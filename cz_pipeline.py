@@ -2284,6 +2284,25 @@ def _checkpoint_dirs():
     return dirs
 
 
+_MODEL_EXTS = (".safetensors", ".ckpt", ".pt", ".sft", ".gguf")
+
+
+def _walk_checkpoints(d):
+    """Model files under `d`, RECURSIVELY, as paths relative to it with '/'.
+
+    A library gets tidied sooner or later -- 4b/ and 9b/, by author, by family. This used
+    to be a single os.listdir, so everything below the first level was invisible and the
+    tidying itself made the models disappear. list_loras has walked subfolders from the
+    start; this now matches it."""
+    out = []
+    for root, dirs, files in os.walk(d):
+        dirs[:] = [x for x in dirs if x not in ("_index", ".cache", "recipes")]
+        for f in files:
+            if f.lower().endswith(_MODEL_EXTS):
+                out.append(os.path.relpath(os.path.join(root, f), d).replace(os.sep, "/"))
+    return sorted(out)
+
+
 def list_checkpoints():
     """Single-file FLUX.2 models (.safetensors / .gguf) from the checkpoints folders (main
     + extra, merged into a single list). ComfyUI 'scaled' FP8/INT8 are accepted (the dequant
@@ -2303,13 +2322,14 @@ def list_checkpoints():
     for d in _checkpoint_dirs():
         if not os.path.isdir(d):
             continue
-        for f in os.listdir(d):
+        for rel in _walk_checkpoints(d):
+            # Deduplicated on the FILE NAME, not the relative path: the main folder still
+            # wins over an extra one holding the same model, wherever either filed it.
+            f = os.path.basename(rel)
             if f in seen:
                 continue
-            if not f.lower().endswith((".safetensors", ".ckpt", ".pt", ".sft", ".gguf")):
-                continue
+            fp = os.path.join(d, rel.replace("/", os.sep))
             if f.lower().endswith(".safetensors"):
-                fp = os.path.join(d, f)
                 dim = _flux2_hidden_dim(fp)
                 if _flux2_variant_mismatch(dim):
                     variant_skips[dim] = variant_skips.get(dim, 0) + 1
@@ -2320,7 +2340,6 @@ def list_checkpoints():
                     _log(f"checkpoint skipped ({reason}): {f}")
                     continue
             if f.lower().endswith(".gguf"):
-                fp = os.path.join(d, f)
                 dim = _gguf_hidden_dim(fp)
                 if _flux2_variant_mismatch(dim):
                     variant_skips[dim] = variant_skips.get(dim, 0) + 1
@@ -2345,7 +2364,7 @@ def list_checkpoints():
                          f"and text encoder/VAE): {f}")
                     continue
             seen.add(f)
-            out.append(f)
+            out.append(rel)
     for dim, n in sorted(variant_skips.items()):
         _log(_variant_skip_summary(n, dim))
     return sorted(out)
@@ -2394,9 +2413,17 @@ def resolve_checkpoint(name):
     if not name or os.path.isabs(name):
         return name
     for d in _checkpoint_dirs():
-        p = os.path.join(d, name)
+        p = os.path.join(d, name.replace("/", os.sep))
         if os.path.isfile(p):
             return p
+    # A preset, a queued job or an image's metadata holds the name the model had when it
+    # was written, and the library may have been tidied into subfolders since. Find it by
+    # its file name rather than answering 'not found' for a model that is right there.
+    base = os.path.basename(name).lower()
+    for d in _checkpoint_dirs():
+        for rel in _walk_checkpoints(d):
+            if os.path.basename(rel).lower() == base:
+                return os.path.join(d, rel.replace("/", os.sep))
     return os.path.join(CHECKPOINTS_DIR, name)
 
 
