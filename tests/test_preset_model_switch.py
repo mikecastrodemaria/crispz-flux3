@@ -165,6 +165,12 @@ def _preset(name, ckpt, steps=7, base=None):
     return p
 
 
+def _ckpt_values(upd):
+    """The menu carries (label, value) pairs since the variant/size labels: what a
+    preset, a queued job or the frontend matches on is the VALUE."""
+    return [v if isinstance(v, str) else v[1] for v in (upd.get("choices") or [])]
+
+
 def _ckpt_update(outs):
     """The checkpoint dropdown's gr.update in _ui_preset_load's output."""
     return outs[U._PRESET_KEYS.index("checkpoint")]
@@ -221,7 +227,7 @@ def test_a_preset_switches_its_own_base_repo():
             upd, status = _ckpt_update(outs), outs[-1]
             # the base has changed -> the 9B checkpoint is now valid AND offered
             assert upd.get("value") == "big9b.safetensors", upd
-            assert "big9b.safetensors" in upd.get("choices"), upd
+            assert "big9b.safetensors" in _ckpt_values(upd), upd
             assert "NOT switched" not in status, status
             assert "Base model switched" in status, status
             # the cost must be announced, not suffered
@@ -307,7 +313,7 @@ def test_base_swap_refreshes_the_checkpoint_list():
             assert P.BASE_REPO == U.KLEIN_BASE_9B, P.BASE_REPO
             assert not P.ZIMAGE_TRANSFORMER, \
                 "a complete base repo must clear the single-file override"
-            status, choices = out[0], out[4].get("choices")
+            status, choices = out[0], _ckpt_values(out[4])
             assert "Non-Commercial" in status and "gated" in status, status
             assert choices and "big9b.safetensors" in choices, choices
             assert "good4b.safetensors" not in choices, \
@@ -316,7 +322,7 @@ def test_base_swap_refreshes_the_checkpoint_list():
 
             # and back to the 4B: the list must flip round
             out = U._apply_checkpoint(U.KLEIN_BASE_4B)
-            choices = out[4].get("choices")
+            choices = _ckpt_values(out[4])
             assert "good4b.safetensors" in choices and "big9b.safetensors" not in choices, choices
             assert "Non-Commercial" not in out[0], out[0]
         finally:

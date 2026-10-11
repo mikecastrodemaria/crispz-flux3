@@ -609,7 +609,7 @@ def _refresh_checkpoints(new_dir, extra_dir=""):
     if n_new:
         msg += f" +{n_new} preset(s) auto-created."
     # 3rd output: refreshes the Presets menu (new models -> new presets).
-    return (gr.update(choices=ZIMAGE_BASE_REPOS + cks), msg, gr.update(choices=list_presets()))
+    return (gr.update(choices=_ckpt_choices()), msg, gr.update(choices=list_presets()))
 
 
 def _ui_set_detailer_denoise(v):
@@ -780,6 +780,36 @@ def _ui_refresh_text_encoders():
     return gr.update(choices=_te_choices()), _te_hint()
 
 
+def _ckpt_choices():
+    """What the 'Klein checkpoint' menu offers, under the 4B/9B selector: the current
+    base repo on its own line, then the single-file checkpoints that fit it, each
+    carrying its variant, its size and its format.
+
+    The OTHER variant's repo is NOT here -- the selector is what switches family. Having
+    both in the menu is what made one entry mean a complete base swap and the next a mere
+    transformer override. The VALUES are unchanged (a repo id, or a path relative to the
+    folder), so presets, queued jobs and image metadata keep working."""
+    repo = cz_pipeline.BASE_REPO or ZIMAGE_BASE_REPOS[0]
+    return ([(f"{repo}   \u00b7   base repo, no override", repo)]
+            + cz_pipeline.checkpoint_choices())
+
+
+def _variant_of_repo(repo=None):
+    """'4B' / '9B' for the selector, from the base repo in use."""
+    return "9B" if str(repo or cz_pipeline.BASE_REPO or "").endswith("9B") else "4B"
+
+
+def _apply_variant(v):
+    """The 4B/9B selector: the same complete base swap that picking the repo in the menu
+    used to do -- transformer, VAE and text encoder all change, and the list of loadable
+    single-file checkpoints with them. Already on that family -> nothing moves, so
+    clicking the current one never costs a reload."""
+    repo = KLEIN_BASE_9B if str(v).upper().startswith("9") else KLEIN_BASE_4B
+    if repo == cz_pipeline.BASE_REPO:
+        return (gr.update(),) * 6
+    return _apply_checkpoint(repo)
+
+
 def _apply_checkpoint(name):
     """Selects either an official FLUX.2 Klein base repo (a complete BASE_REPO swap), or a
     local single-file checkpoint (a transformer override, with the VAE/encoder from the base
@@ -824,7 +854,7 @@ def _apply_checkpoint(name):
                 f"{len(cks)} single-file checkpoint(s) fit this base.{saved}"
                 + (f"\n\n{note}" if note else ""),
                 gr.update(value=st), gr.update(value=g), perf_upd,
-                gr.update(choices=ZIMAGE_BASE_REPOS + cks, value=name),
+                gr.update(choices=_ckpt_choices(), value=name),
                 gr.update(choices=list_presets()))
     # A checkpoint the listing discards (the wrong 4B/9B variant, a stray LoRA, a GGUF
     # of another architecture) must NOT become the current transformer: it would load
@@ -1009,7 +1039,7 @@ def _refresh_loras(new_dir, extra_dirs=""):
                           "loras_extra_dirs": list(cz_pipeline.LORAS_EXTRA_DIRS)})
     except Exception:
         pass
-    lr = ["None"] + list_loras()
+    lr = [("None", "None")] + cz_pipeline.lora_choices()
     locs = " + ".join(cz_pipeline._lora_dirs())
     status = f"{len(lr) - 1} LoRA(s) in {locs} (saved)."
     return tuple(gr.update(choices=lr) for _ in range(MAX_LORA_SLOTS)) + (status,)
@@ -3871,12 +3901,12 @@ def _ui_preset_load(name):
     note = _preset_switch_base(data)
     ckpt = data.get("checkpoint")
     cks = list_checkpoints()                       # after the base swap, if any
-    ckpt_upd = gr.update(choices=ZIMAGE_BASE_REPOS + cks)
+    ckpt_upd = gr.update(choices=_ckpt_choices())
     if ckpt and ckpt not in (ZIMAGE_BASE_REPOS + cks):
         note += _preset_ckpt_refusal(ckpt, data)
         data = {k: v for k, v in data.items() if k != "checkpoint"}
     elif ckpt:
-        ckpt_upd = gr.update(choices=ZIMAGE_BASE_REPOS + cks, value=ckpt)
+        ckpt_upd = gr.update(choices=_ckpt_choices(), value=ckpt)
     scal = [ckpt_upd if k == "checkpoint"
             else (gr.update(value=data[k]) if k in data else gr.update())
             for k in _PRESET_KEYS]
@@ -4667,10 +4697,22 @@ def build_ui():
                                 save_paths_btn = gr.Button("Save paths", size="sm")
                             paths_status = gr.Markdown("")
                             with gr.Column():
-                                _ckpt_choices = ZIMAGE_BASE_REPOS + list_checkpoints()
-                                _ckpt_value = cz_pipeline.BASE_REPO if cz_pipeline.BASE_REPO in _ckpt_choices else ZIMAGE_BASE_REPOS[0]
-                                ckpt_dd = gr.Dropdown(choices=_ckpt_choices,
-                                                      value=_ckpt_value, label="Klein checkpoint", scale=3)
+                                variant_rb = gr.Radio(
+                                    ["4B", "9B"], value=_variant_of_repo(),
+                                    label="Klein family",
+                                    info="A complete base swap. The 4B is Apache-2.0 and "
+                                         "fits whole on a 32 GB card; the 9B is "
+                                         "non-commercial, gated, and has to stream its "
+                                         "weights (measured 2.3 s against 9.8 s an "
+                                         "image). The menu below follows: a checkpoint "
+                                         "of one family does not load in the other.")
+                                _choices0 = _ckpt_choices()
+                                _vals0 = [v for _lab, v in _choices0]
+                                ckpt_dd = gr.Dropdown(
+                                    choices=_choices0,
+                                    value=(cz_pipeline.BASE_REPO if cz_pipeline.BASE_REPO in _vals0
+                                           else (_vals0[0] if _vals0 else None)),
+                                    label="Klein checkpoint", scale=3)
                                 with gr.Row():      # the buttons UNDER the dropdown (full width above)
                                     ckpt_open_btn = gr.Button("\U0001F5BC️ Browse", size="sm", scale=1,
                                                               elem_id="cz_ckpt_open")
@@ -4716,14 +4758,18 @@ def build_ui():
                                 f"`{cz_pipeline.LORA_WEIGHT_MIN:g}..{cz_pipeline.LORA_WEIGHT_MAX:g}` "
                                 "(config `lora_weight_min` / `lora_weight_max`) — a "
                                 "**negative** weight inverts the LoRA's effect.*")
-                            _lchoices = ["None"] + list_loras()
+                            # Labelled like the checkpoints: on a 4B base a 9B LoRA
+                            # simply cannot load, and the only way to find out used to be
+                            # to pick it and read the refusal. The VALUE stays the name.
+                            _lchoices = [("None", "None")] + cz_pipeline.lora_choices()
+                            _lvalues = {v for _lab, v in _lchoices}
                             # The config LoRAs (`default_loras`) are already resolved
                             # in cz_pipeline.LORAS at import time -> so the slots are
                             # pre-filled for the UI to reflect the model's real state.
                             def _lora_slot_default(i):
                                 if i < len(cz_pipeline.LORAS):
                                     name = os.path.basename(cz_pipeline.LORAS[i][0])
-                                    if name in _lchoices:
+                                    if name in _lvalues:
                                         return name, float(cz_pipeline.LORAS[i][1])
                                 return "None", float(cz_pipeline.LORA_WEIGHT)
 
@@ -5013,6 +5059,13 @@ def build_ui():
         # no new .change, no loop.
         ckpt_dd.change(_apply_checkpoint, [ckpt_dd],
                        [ckpt_status, gen_steps, guidance, performance, ckpt_dd, preset_dd]) \
+            .then(_ui_refresh_text_encoders, None, [te_dd, te_status])
+        # The same six outputs as the menu: the selector does the same base swap,
+        # and the menu is one of them -- it has to be refilled with the other
+        # family's models.
+        variant_rb.change(_apply_variant, [variant_rb],
+                          [ckpt_status, gen_steps, guidance, performance, ckpt_dd,
+                           preset_dd]) \
             .then(_ui_refresh_text_encoders, None, [te_dd, te_status])
         # CivitAI community settings -> steps/CFG/sampler/schedule (programmatic
         # updates do not fire .change, hence the explicit .then calls).

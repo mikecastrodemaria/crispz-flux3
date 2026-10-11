@@ -1311,9 +1311,14 @@ def _flux2_lora_hidden_dim(path):
     message this replaces.
 """
     try:
-        hdr = _safetensors_header(path)
+        return _flux2_lora_dim_from_header(_safetensors_header(path))
     except Exception:
         return None
+
+
+def _flux2_lora_dim_from_header(hdr):
+    """The same, from a header already read -- model_info holds one and must not open
+    the file a second time for it."""
     seen = {}
     for k, v in hdr.items():
         if k == "__metadata__" or not isinstance(v, dict):
@@ -2425,6 +2430,130 @@ def resolve_checkpoint(name):
             if os.path.basename(rel).lower() == base:
                 return os.path.join(d, rel.replace("/", os.sep))
     return os.path.join(CHECKPOINTS_DIR, name)
+
+
+_FILE_INFO_CACHE = {}
+_DTYPE_LABEL = {"BF16": "bf16", "F16": "fp16", "F32": "fp32", "F8_E4M3": "FP8",
+                "F8_E5M2": "FP8", "I8": "INT8", "I16": "INT16"}
+# ggml file types, the handful a diffusion checkpoint actually uses.
+_GGUF_FTYPE = {0: "F32", 1: "F16", 2: "Q4_0", 3: "Q4_1", 7: "Q8_0", 8: "Q5_0", 9: "Q5_1",
+               10: "Q2_K", 11: "Q3_K", 12: "Q4_K", 13: "Q5_K", 14: "Q6_K", 15: "Q8_K",
+               30: "BF16"}
+
+
+def _quant_short(name):
+    """'float8_e4m3fn' -> 'FP8'. The declared format names itself in full; a menu line
+    has no room for it, and the family is what the reader needs."""
+    n = (name or "").lower()
+    for needle, short in (("float8", "FP8"), ("fp8", "FP8"), ("int8", "INT8"),
+                          ("int4", "INT4"), ("nf4", "NF4"), ("fp4", "FP4")):
+        if needle in n:
+            return short
+    return (name or "").upper()
+
+
+def _human_size(n):
+    """'16.9 GB' / '92 MB'. Below a gigabyte nobody cares about the decimal."""
+    return f"{n / 2 ** 30:.1f} GB" if n >= 2 ** 30 else f"{max(1, round(n / 2 ** 20))} MB"
+
+
+def _file_stamp(path):
+    try:
+        st = os.stat(path)
+        return (st.st_size, int(st.st_mtime))
+    except OSError:
+        return None
+
+
+def _gguf_ftype(path, max_kv=64):
+    """'Q8_0' / 'F16'... from general.file_type, or None. Header only, like _gguf_arch."""
+    import struct
+    try:
+        with open(path, "rb") as f:
+            if f.read(4) != b"GGUF":
+                return None
+            f.seek(4 + 8, 1)
+            nkv = struct.unpack("<Q", f.read(8))[0]
+            for _ in range(min(nkv, max_kv)):
+                kl = struct.unpack("<Q", f.read(8))[0]
+                if kl > 4096:
+                    return None
+                key = f.read(kl).decode("utf-8", "replace")
+                t = struct.unpack("<I", f.read(4))[0]
+                if key == "general.file_type" and t in (4, 5):      # u32 / i32
+                    return _GGUF_FTYPE.get(struct.unpack("<I", f.read(4))[0])
+                _gguf_skip(f, t)
+    except Exception as e:
+        _dbg(f"gguf file_type read failed {path}: {e}")
+    return None
+
+
+def model_info(path, kind="checkpoint"):
+    """What a single file IS: {'variant', 'format', 'size', 'size_h'}. Header only.
+
+    CACHED on (path, size, mtime). A menu is rebuilt at every refresh, and re-reading a
+    hundred headers off a mechanical disk each time would be felt. A file that changes on
+    disk changes its stamp, so the entry is simply recomputed.
+"""
+    stamp = _file_stamp(path)
+    if stamp is None:
+        return {}
+    key = (os.path.normcase(os.path.abspath(path)), stamp, kind)
+    hit = _FILE_INFO_CACHE.get(key)
+    if hit is not None:
+        return hit
+    info = {"size": stamp[0], "size_h": _human_size(stamp[0]), "variant": None,
+            "format": ""}
+    try:
+        if path.lower().endswith(".gguf"):
+            info["variant"] = _FLUX2_VARIANTS.get(_gguf_hidden_dim(path))
+            info["format"] = "GGUF " + (_gguf_ftype(path) or "")
+        else:
+            hdr = _safetensors_header(path)
+            if kind == "lora":
+                dim = _flux2_lora_dim_from_header(hdr)
+            else:
+                dim = _flux2_hidden_dim_from_shapes(
+                    (k, v.get("shape")) for k, v in hdr.items()
+                    if k != "__metadata__" and isinstance(v, dict))
+            info["variant"] = _FLUX2_VARIANTS.get(dim)
+            if kind != "lora":
+                fmts = _quant_metadata_formats(hdr)
+                counts = {}
+                for k, v in hdr.items():
+                    if k != "__metadata__" and isinstance(v, dict):
+                        d = v.get("dtype")
+                        counts[d] = counts.get(d, 0) + 1
+                # The DOMINANT dtype, not the first: a FP8 checkpoint keeps its norms and
+                # biases in F32, and reading one of those first would label it fp32.
+                top = max(counts, key=counts.get) if counts else None
+                info["format"] = (_quant_short(sorted(fmts)[0]) if fmts
+                                  else _DTYPE_LABEL.get(top, (top or "").lower()))
+    except Exception as e:
+        _dbg(f"model_info failed {path}: {e}")
+    info["format"] = info["format"].strip()
+    _FILE_INFO_CACHE[key] = info
+    return info
+
+
+def model_label(rel, path, kind="checkpoint"):
+    """The menu line: the name, then what decides whether it loads and what it costs."""
+    info = model_info(path, kind)
+    bits = [b for b in (info.get("variant"), info.get("size_h"), info.get("format")) if b]
+    return f"{rel}   ·   {' · '.join(bits)}" if bits else rel
+
+
+def checkpoint_choices():
+    """[(label, value)] for the checkpoint menu. The value stays the relative path."""
+    return [(model_label(rel, resolve_checkpoint(rel)), rel) for rel in list_checkpoints()]
+
+
+def lora_choices():
+    """[(label, value)] for the LoRA menus. The value stays the relative name.
+
+    The variant matters more here than anywhere: a 4B LoRA simply cannot load on a 9B
+    base, and until now the only way to find out was to pick it and read the refusal."""
+    return [(model_label(rel, resolve_lora_path(rel), "lora"), rel) for rel in list_loras()]
 
 
 def list_loras():
