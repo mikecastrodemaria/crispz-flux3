@@ -1,7 +1,13 @@
 # Changelog
 
-All notable changes to crispz-klein. One versioned entry per feature.
+All notable changes to crispz-flux3 (entries below 0.1.0-dev are crispz-klein's history). One versioned entry per feature.
 The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browser tab title.
+
+
+## 0.1.0-dev : fork of crispz-klein for FLUX.3 Image Klein
+
+Skeleton only: the project is renamed and FORK.md lays out the port. No FLUX.3 code
+yet, the engine is still crispz-klein's FLUX.2 one.
 
 
 ## Unreleased — The image as it forms, in the result gallery

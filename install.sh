@@ -17,7 +17,7 @@ cd "$(dirname "$0")"
 
 # The pipeline expected for this model family. The ONLY line that differs between
 # crispz-studio (ZImage), crispz-krea2 (Krea2), crispz-qwen-edit (Qwen)
-# and crispz-klein (FLUX.2).
+# and crispz-flux3 (FLUX.2).
 CHECK_PIPE=Flux2KleinInpaintPipeline
 
 USE_VENV=1

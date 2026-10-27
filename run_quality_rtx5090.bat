@@ -1,8 +1,8 @@
 @echo off
-title crispz-klein - RTX 5090 (local)
+title crispz-flux3 - RTX 5090 (local)
 cd /d "%~dp0"
 echo ============================================
-echo  crispz-klein - RTX 5090 (local 127.0.0.1)
+echo  crispz-flux3 - RTX 5090 (local 127.0.0.1)
 echo ============================================
 echo.
 REM CUDA optimisations (harmless, BF16)

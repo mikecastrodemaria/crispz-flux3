@@ -17,7 +17,7 @@ cd /d "%~dp0"
 
 REM The pipeline expected for this model family. The ONLY line that differs
 REM between crispz-studio (ZImage), crispz-krea2 (Krea2), crispz-qwen-edit (Qwen)
-REM and crispz-klein (FLUX.2). Inpaint is the right marker here: it is the one
+REM and crispz-flux3 (FLUX.2). Inpaint is the right marker here: it is the one
 REM that ALSO serves as img2img (a full white mask), see FORK.md.
 set CHECK_PIPE=Flux2KleinInpaintPipeline
 

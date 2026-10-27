@@ -1,4 +1,4 @@
-"""crispz-klein - the FLUX.2 Klein core (diffusers, BF16): loading the pipelines
+"""crispz-flux3 - the FLUX.2 Klein core (diffusers, BF16): loading the pipelines
 (txt2img / img2img / inpaint) + multi-reference editing (Omni/Edit tab) + LoRAs /
 checkpoints / transformer, generation and orchestration (generate / txt2img_run /
 process_one / outpaint / inpaint) + the mutable runtime state.
@@ -459,7 +459,7 @@ def _cfg(negative=None, guidance=None):
 # Encoding a prompt sends the text encoder through the GPU. Under 'model' offload that
 # transfer is paid on EVERY pipeline call -- including the detailer's passes, which
 # redo the SAME prompt once per face and per hand.
-# Measured on crispz-klein (9B GGUF, model offload): prompt+setup 5.2-6.1 s per pass
+# Measured on crispz-flux3 (9B GGUF, model offload): prompt+setup 5.2-6.1 s per pass
 # without the cache against 1.7-1.8 s with it, for 0.3 s of diffusion. 2.1x per hand.
 # Without offload the win drops to ~8 % (the encoder is already resident, nothing to
 # move).
@@ -3262,7 +3262,7 @@ def restore_offload(pipe, why=""):
         else:
             pipe.to(DEVICE)
     except Exception as e:
-        _log(f"pipeline left on the CPU and NOT restored ({e}): restart crispz-klein")
+        _log(f"pipeline left on the CPU and NOT restored ({e}): restart crispz-flux3")
         return False
     _log(f"pipeline was left on the CPU{' after ' + why if why else ''} -> offload "
          f"'{off}' restored in place (no reload)")
@@ -5170,7 +5170,7 @@ def source_meta(items, key="source"):
 def _gen_meta(mode, prompt, negative="", seed=None, steps=None, guidance=None,
               size=None, model=None, styles=None, extra=None):
     """Builds the generation metadata dict (for the sidecar/PNG)."""
-    m = {"app": "crispz-klein", "mode": mode, "prompt": prompt or "",
+    m = {"app": "crispz-flux3", "mode": mode, "prompt": prompt or "",
          "negative": negative or "", "date": _now_stamp()}
     if seed is not None and int(seed) >= 0:
         m["seed"] = int(seed)

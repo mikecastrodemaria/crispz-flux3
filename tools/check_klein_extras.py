@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check whether the FLUX.2 Klein extras crispz-klein is still missing have shipped.
+"""Check whether the FLUX.2 Klein extras crispz-flux3 is still missing have shipped.
 
 Unlike the upstream forks, klein needs NO edit model to watch for: multi-reference
 editing is native to the base pipeline. What it actually lacks (cf. FORK.md) is:

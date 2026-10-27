@@ -1,5 +1,5 @@
 @echo off
-REM Update crispz-klein (Windows): fetches the GitHub commits then brings the
+REM Update crispz-flux3 (Windows): fetches the GitHub commits then brings the
 REM dependencies back in line with the lock, WITHOUT breaking the existing install.
 REM
 REM What it does, in order:
@@ -17,7 +17,7 @@ REM   --no-pull      skip the git pull (resynchronise the deps only)
 REM   --shared       use requirements.txt instead of the lock (a shared venv)
 
 setlocal enabledelayedexpansion
-title crispz-klein - Update
+title crispz-flux3 - Update
 cd /d "%~dp0"
 
 set "FORCEDEPS=0"
@@ -32,7 +32,7 @@ shift
 goto argloop
 :argdone
 
-echo === crispz-klein - update ===
+echo === crispz-flux3 - update ===
 echo.
 
 REM --- The interpreter ---

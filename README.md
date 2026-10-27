@@ -1,4 +1,8 @@
-# crispz-klein
+# crispz-flux3
+
+> **Work in progress (0.1.0-dev).** Fork of crispz-klein for FLUX.3 Image Klein. The
+> rest of this README still describes the inherited FLUX.2 Klein behaviour: see
+> [FORK.md](FORK.md) for the port status and the roadmap.
 
 > FLUX.2 Klein txt2img + multi-reference editing + upscaler/detailer studio
 > (fork of [crispz-qwen-edit](https://github.com/mikecastrodemaria/crispz-qwen-edit),
@@ -6,7 +10,7 @@
 > [crispz](https://github.com/mikecastrodemaria/crispz)).
 > Current version: **1.18.5** — see [CHANGELOG.md](CHANGELOG.md).
 
-![crispz-klein — FLUX.2 Klein creation + editing studio](assets/screenshot.png)
+![crispz-flux3 — FLUX.2 Klein creation + editing studio](assets/screenshot.png)
 
 *The Text → Image tab, real capture: a 1024×1024 comic panel in **1.6 s** at 4 steps.*
 
@@ -332,7 +336,7 @@ the single biggest difference with the rest of the crispz family:
 | crispz-studio (Z-Image) | none — no Omni/Edit model released | — |
 | crispz-krea2 (Krea 2) | none — no instruction-edit pipeline exists | — |
 | crispz-qwen-edit (Qwen-Image) | yes, via a **separate** Qwen-Image-Edit model | a second ~20B model in RAM/VRAM |
-| **crispz-klein (FLUX.2 Klein)** | **yes, in the base pipeline** | **zero — same model, same weights** |
+| **crispz-flux3 (FLUX.2 Klein)** | **yes, in the base pipeline** | **zero — same model, same weights** |
 
 `Flux2KleinPipeline.__call__` takes `image` as `list[PIL] | PIL`, so passing several
 references is just another argument. Nothing to configure, nothing to download, no
@@ -518,7 +522,7 @@ dep/model is missing, the run still succeeds and the report says `faceswap skipp
 inswapper produces a **128 px** face and insightface pastes it back through a plain
 **rectangle**. That rectangle is blind to what is in front of the face: a hand, food,
 a microphone or a strand of hair falling over the mouth gets painted over by the
-generated pixels. crispz-klein therefore does its own compositing, with four passes
+generated pixels. crispz-flux3 therefore does its own compositing, with four passes
 you can toggle under *Face Swap → Blending quality* (all on by default):
 
 | Setting | What it fixes | Model (auto-downloaded) |

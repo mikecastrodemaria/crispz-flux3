@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Update crispz-klein (Unix): fetches the GitHub commits then brings the
+# Update crispz-flux3 (Unix): fetches the GitHub commits then brings the
 # dependencies back in line with the lock, WITHOUT breaking the existing install.
 #
 #   --force-deps   reinstall the deps even when nothing has changed
@@ -17,7 +17,7 @@ for a in "$@"; do
   esac
 done
 
-echo "=== crispz-klein - update ==="
+echo "=== crispz-flux3 - update ==="
 RUNPY=python3
 [ -x ".venv/bin/python" ] && RUNPY=".venv/bin/python"
 [ -x "env/bin/python" ] && RUNPY="env/bin/python"

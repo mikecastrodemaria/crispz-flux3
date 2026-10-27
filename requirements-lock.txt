@@ -1,4 +1,4 @@
-# crispz-klein — a locked environment, an ISOLATED venv.
+# crispz-flux3 — a locked environment, an ISOLATED venv.
 #
 # WHY THIS FILE
 # requirements.txt gives the bounds ("what has to work"). This file gives the
@@ -43,7 +43,7 @@ huggingface-hub==0.36.2
 peft==0.19.1
 sentencepiece==0.2.2
 spandrel==0.4.1
-# gguf: crispz-klein DOES have a GGUF loading path (_load_transformer ->
+# gguf: crispz-flux3 DOES have a GGUF loading path (_load_transformer ->
 # from_single_file + GGUFQuantizationConfig). The comment inherited from
 # crispz-studio said the opposite and the package was missing from the lock: an
 # ISOLATED install therefore produced a venv with no gguf, where test_quant_formats
