@@ -1,7 +1,16 @@
-"""crispz-flux3 - the FLUX.2 Klein core (diffusers, BF16): loading the pipelines
-(txt2img / img2img / inpaint) + multi-reference editing (Omni/Edit tab) + LoRAs /
-checkpoints / transformer, generation and orchestration (generate / txt2img_run /
-process_one / outpaint / inpaint) + the mutable runtime state.
+"""crispz-flux3 - the FLUX.3 Image Klein core (diffusers ModularPipeline, BF16): loading
+the pipeline (txt2img / img2img / inpaint / multi-reference edit, ONE object, see
+cz_flux3.Flux3Pipe) + LoRAs / checkpoints / transformer, generation and orchestration
+(generate / txt2img_run / process_one / outpaint / inpaint) + the mutable runtime state.
+
+FLUX.3 port (crispz-flux3 0.1): the model is loaded by cz_flux3.load(), which wraps the
+modular pipeline behind the Flux2Klein calling convention this module was written
+against. So the call sites below did not change; what changed is listed in FORK.md
+(loading, guards by model FAMILY rather than hidden size, no text-encoder swap, Euler
+only). The FLUX.2 notes further down are crispz-klein's history and stay true of the
+calling convention, not of the model.
+
+--- crispz-klein's original notes ---
 
 Fork of crispz-qwen-edit (Qwen-Image). Mapping:
   - base txt2img             -> Flux2KleinPipeline
@@ -49,10 +58,12 @@ from cz_core import (
     _prefs, _is_single_file, _looks_single_file, _log, _dbg,
 )
 
-# The base FLUX.2 Klein model (txt2img/img2img/inpaint/edit). Overridden through env
-# ZIMAGE_MODEL (compat) or KLEIN_MODEL, or prefs. Public repo, Apache 2.0.
-# CAREFUL: do NOT switch to FLUX.2-klein-9B (non-commercial licence), see FORK.md.
-DEFAULT_BASE_REPO = (os.environ.get("KLEIN_MODEL") or "black-forest-labs/FLUX.2-klein-4B")
+import cz_flux3
+
+# The base FLUX.3 Image Klein model (txt2img/img2img/inpaint/edit). Overridden through env
+# FLUX3_MODEL or prefs/config 'flux3_model'. GATED repo, FLUX Kommunity License: accept
+# the conditions on the model page with your HF account and set `hf_token`. See FORK.md.
+DEFAULT_BASE_REPO = (os.environ.get("FLUX3_MODEL") or cz_flux3.FLUX3_DISTILLED)
 # Multi-reference editing has NO separate model on klein: the base pipeline's `image`
 # takes a list of PIL images. The "omni" default is therefore the base model itself
 # (the symbol survives for cz_ui / cz_protocol, see the module docstring).
@@ -81,8 +92,10 @@ if DEVICE == "cuda":
 # so no existing config breaks, and they are reported when they answer.
 # NB: the Python VARIABLES keep their names (ZIMAGE_TRANSFORMER...) - cz_ui, cz_cli and
 # cz_protocol import them, that is the module's API contract (see the docstring).
-CFG_MODEL_KEY = "klein_model"
-CFG_TRANSFORMER_KEY = "klein_transformer"
+# crispz-flux3: its own keys. The klein_* ones are NOT read: they point at FLUX.2 repos and
+# checkpoints, which do not load in a FLUX.3 pipeline.
+CFG_MODEL_KEY = "flux3_model"
+CFG_TRANSFORMER_KEY = "flux3_transformer"
 
 
 def _cfg_first(*keys, env=()):
@@ -103,15 +116,38 @@ def _cfg_first(*keys, env=()):
     return None
 
 
-_zmodel = _cfg_first(CFG_MODEL_KEY, "zimage_model",
-                     env=("KLEIN_MODEL", "ZIMAGE_MODEL")) or DEFAULT_BASE_REPO
-ZIMAGE_TRANSFORMER = _cfg_first(CFG_TRANSFORMER_KEY, "zimage_transformer",
-                                env=("KLEIN_TRANSFORMER", "ZIMAGE_TRANSFORMER"))
+_zmodel = _cfg_first(CFG_MODEL_KEY, env=("FLUX3_MODEL",)) or DEFAULT_BASE_REPO
+ZIMAGE_TRANSFORMER = _cfg_first(CFG_TRANSFORMER_KEY, env=("FLUX3_TRANSFORMER",))
 if _is_single_file(_zmodel):
     ZIMAGE_TRANSFORMER = _zmodel
     BASE_REPO = DEFAULT_BASE_REPO
 else:
     BASE_REPO = _zmodel
+if not cz_flux3.is_flux3_repo(BASE_REPO):
+    _log(f"config: '{BASE_REPO}' is not a FLUX.3 repo (crispz-flux3 only runs FLUX.3 Image "
+         f"Klein) -> using {DEFAULT_BASE_REPO}")
+    BASE_REPO = DEFAULT_BASE_REPO
+
+# Transformer precision for the official repos: bf16 (transformer/, ~11 GB), or BFL's
+# pre-quantized fp8r (~6.3 GB, fast from compute capability 8.9) / nvfp4 (~5.3 GB,
+# Blackwell + flashinfer). Ignored when a single-file transformer is set.
+PRECISION = str(os.environ.get("FLUX3_PRECISION") or _prefs.get("flux3_precision")
+                or CONFIG.get("flux3_precision") or "bf16").strip().lower()
+if PRECISION not in cz_flux3.PRECISIONS:
+    _log(f"config: flux3_precision '{PRECISION}' unknown "
+         f"({'/'.join(cz_flux3.PRECISIONS)}) -> bf16")
+    PRECISION = "bf16"
+
+
+def _hf_token():
+    """The HF token for the gated FLUX.3 repos: env HF_TOKEN, else config `hf_token`."""
+    return (os.environ.get("HF_TOKEN") or CONFIG.get("hf_token") or _prefs.get("hf_token")
+            or None)
+
+
+def is_base_variant(repo=None):
+    """True on the undistilled checkpoint (50 steps + real CFG + negative prompt)."""
+    return cz_flux3.is_base_repo(repo or BASE_REPO)
 
 # Replacement text encoder (Models > Checkpoints > Text encoder). Empty = the one from
 # the base repo, as before. Otherwise a FOLDER in transformers format (config.json +
@@ -450,8 +486,11 @@ def _cfg(negative=None, guidance=None):
     a warning on a spec that carries one) -- house rule: degradation announced,
     never silent.
 """
+    # FLUX.3 base checkpoint: real CFG, so the negative prompt is real too.
+    if is_base_variant():
+        return {"negative_prompt": negative} if negative else {}
     if negative:
-        _dbg("negative prompt ignored: klein is distilled (no CFG, no negative_prompt)")
+        _dbg("negative prompt ignored: the distilled FLUX.3 checkpoint has no CFG")
     return {}
 
 
@@ -547,6 +586,20 @@ def _qwen_call(pipe, **kw):
     # silence the noise. Should an UNdistilled FLUX.2 checkpoint ever be loaded,
     # is_distilled is false and the UI slider is passed through, becoming a real CFG again.
     need_cfg = False
+    if "guidance_scale" not in kw and isinstance(pipe, cz_flux3.Flux3Pipe):
+        # FLUX.3: the distilled checkpoint is a FLOW MAP (each step also tells the
+        # transformer which timestep it jumps to): there is no unconditional branch to
+        # turn on, a single-file override included. The base checkpoint takes the slider
+        # as a real CFG. No register_to_config trick in either case.
+        want = float(GUIDANCE)
+        if pipe.config.is_distilled:
+            if want > 1.0 and want not in _CFG_IGNORED_SAID:
+                _CFG_IGNORED_SAID.add(want)
+                _log(f"guidance {want:g} ignored: {BASE_REPO} is the distilled FLUX.3 "
+                     f"checkpoint (16 steps, no CFG). Use the -base repo for a real CFG.")
+            kw["guidance_scale"] = 1.0
+        else:
+            kw["guidance_scale"] = want
     if "guidance_scale" not in kw:
         try:
             distilled = bool(getattr(pipe.config, "is_distilled", False))
@@ -702,11 +755,25 @@ def _build_scheduler(sampler, schedule, config):
     return FlowMatchEulerDiscreteScheduler.from_config(config, **kw)
 
 
+_SAMPLER_IGNORED_SAID = set()
+
+
 def _apply_sampler(pipe):
     """Applies the current scheduler (SAMPLER x SCHEDULE) to a pipe. Checks compatibility
     (custom sigmas) and falls back to Euler/sgm_uniform when it fails -> never a crash at
     generation time."""
     if _BASE_SCHED_CONFIG is None:
+        return
+    if isinstance(pipe, cz_flux3.Flux3Pipe):
+        # FLUX.3 runs its own FlowMatch Euler (constant shift 6.93). The distilled
+        # checkpoint is a flow map: every step tells the transformer the NEXT timestep, so
+        # a multistep sampler or a remapped schedule would feed it jumps it was not
+        # trained on. Kept as is; the choice is said once.
+        if (SAMPLER, SCHEDULE) != ("euler", "sgm_uniform") and \
+                (SAMPLER, SCHEDULE) not in _SAMPLER_IGNORED_SAID:
+            _SAMPLER_IGNORED_SAID.add((SAMPLER, SCHEDULE))
+            _log(f"sampler '{SAMPLER}/{SCHEDULE}' not applied: FLUX.3 runs its native "
+                 f"FlowMatch Euler schedule (shift 6.93).")
         return
     from diffusers import FlowMatchEulerDiscreteScheduler
     try:
@@ -1504,11 +1571,15 @@ def _lora_unsupported(path):
     removed upstream from the set handed to peft. A LoHa stays refused by name -- without
     that it goes as is into load_lora_weights, which recognises none of its keys, applies
     NOTHING and says nothing."""
-    # Wrong variant (a 4B LoRA on a 9B base, or the reverse). First: it is the common
-    # case, and the only one whose raw failure is unreadable.
-    bad = _flux2_variant_mismatch(_flux2_lora_hidden_dim(path))
-    if bad:
-        return _lora_variant_refusal(_flux2_lora_hidden_dim(path))
+    # Wrong family: a FLUX.2 LoRA on FLUX.3. Read from the tensor NAMES (the hidden size
+    # is the same 3072 on FLUX.2-klein-4B and FLUX.3, see _flux3_file_refusal).
+    try:
+        fam = cz_flux3.family_from_keys(_safetensors_header(path).keys())
+    except Exception:
+        fam = None
+    if fam == "flux2":
+        return ("FLUX.2 Klein LoRA - its layers (double_blocks / transformer_blocks) do "
+                "not exist in FLUX.3, peft would match nothing. It works in crispz-klein")
     algo = _lycoris_algo(path)
     if algo and algo != "LoKr":
         return (f"LyCORIS {algo} - only LoKr is supported here; peft recognises none "
@@ -2308,82 +2379,98 @@ def _walk_checkpoints(d):
     return sorted(out)
 
 
-def list_checkpoints():
-    """Single-file FLUX.2 models (.safetensors / .gguf) from the checkpoints folders (main
-    + extra, merged into a single list). ComfyUI 'scaled' FP8/INT8 are accepted (the dequant
-    loader, see _safetensors_dequant); only these stay discarded, with their reason: stray
-    LoRAs, SVDQuant/Nunchaku INT4, GGUFs of another architecture or in the sd.cpp layout,
-    and the builds of the OTHER variant (4B/9B).
+# --- crispz-flux3: which single files are FLUX.3 transformers -----------------------
+# crispz-klein sorted single files by HIDDEN SIZE (3072 = 4B, 4096 = 9B). That test is
+# blind here: FLUX.3 Image Klein is ALSO 3072 wide, so a FLUX.2-klein-4B checkpoint
+# would pass it and die gigabytes later in load_state_dict. The family is read from the
+# tensor NAMES instead (cz_flux3.family_from_keys), header only.
+_FAMILY_CACHE = {}
 
-    VARIANT mismatches are grouped: a library can hold dozens of klein-9B, and repeating
-    the instructions on every line drowns the log. One short line per file, then ONE
-    summary that says what to do.
+
+def _file_tensor_names(path):
+    """Tensor names of a .safetensors / .gguf, from the header alone. [] when unreadable."""
+    try:
+        if _is_gguf_path(path):
+            from gguf import GGUFReader
+            return [t.name for t in GGUFReader(path).tensors]
+        return [k for k in _safetensors_header(path) if k != "__metadata__"]
+    except Exception as e:
+        _dbg(f"tensor names unreadable {path}: {e}")
+        return []
+
+
+def _file_family(path):
+    """'flux3' / 'flux2' / None for a single file, cached by (path, size, mtime)."""
+    try:
+        st = os.stat(path)
+        key = (path, st.st_size, st.st_mtime)
+    except OSError:
+        return None
+    if key not in _FAMILY_CACHE:
+        _FAMILY_CACHE[key] = cz_flux3.family_from_keys(_file_tensor_names(path))
+    return _FAMILY_CACHE[key]
+
+
+def _flux3_file_refusal(path):
+    """A reason (str) when this single file is not a loadable FLUX.3 transformer, else
+    None. Never opens more than the header."""
+    names = _file_tensor_names(path)
+    if not names:
+        return ("its header cannot be read (a truncated download, or not a "
+                ".safetensors / .gguf at all)")
+    if any(_lora_side(n) for n in names[:200]):
+        return "it is a LoRA, not a checkpoint: put it in the LoRA folder"
+    fam = _file_family(path)
+    if fam == "flux2":
+        return ("it is a FLUX.2 Klein checkpoint. FLUX.2 and FLUX.3 do not share "
+                "weights: it runs in crispz-klein, not in crispz-flux3")
+    if fam != "flux3":
+        return ("no FLUX.3 transformer tensor in it (a VAE, a text encoder, or "
+                "another model family); crispz-flux3 only loads FLUX.3 Image Klein "
+                "transformers")
+    return None
+
+
+def list_checkpoints():
+    """Single-file FLUX.3 transformers (.safetensors / .gguf) from the checkpoints folders
+    (main + extra, merged into a single list). Anything else is skipped with its reason;
+    the FLUX.2 ones (a library shared with crispz-klein) are COUNTED and reported in one
+    line rather than one line each.
 
     On a duplicate file name, the main folder wins.
 """
     out = []
     seen = set()
-    variant_skips = {}          # dim -> number of discarded files
+    flux2_skips = 0
     for d in _checkpoint_dirs():
         if not os.path.isdir(d):
             continue
         for rel in _walk_checkpoints(d):
-            # Deduplicated on the FILE NAME, not the relative path: the main folder still
-            # wins over an extra one holding the same model, wherever either filed it.
             f = os.path.basename(rel)
             if f in seen:
                 continue
             fp = os.path.join(d, rel.replace("/", os.sep))
-            if f.lower().endswith(".safetensors"):
-                dim = _flux2_hidden_dim(fp)
-                if _flux2_variant_mismatch(dim):
-                    variant_skips[dim] = variant_skips.get(dim, 0) + 1
-                    _dbg(f"checkpoint skipped ({_variant_name(dim)}): {f}")
-                    continue
-                reason = _safetensors_unsupported(fp)
-                if reason:
-                    _log(f"checkpoint skipped ({reason}): {f}")
-                    continue
-            if f.lower().endswith(".gguf"):
-                dim = _gguf_hidden_dim(fp)
-                if _flux2_variant_mismatch(dim):
-                    variant_skips[dim] = variant_skips.get(dim, 0) + 1
-                    _dbg(f"checkpoint skipped ({_variant_name(dim)}): {f}")
-                    continue
-                lay, a = _gguf_layout(fp), _gguf_arch(fp)
-                # The LAYOUT beats the declared architecture: tensor names are proof,
-                # the 'general.architecture' KV a mere label -- and conversion tools stamp
-                # it wrong (Qwen-Image files published as 'wan').
-                if lay == "foreign":
-                    _log(f"checkpoint skipped ({_gguf_layout_unsupported(fp)}): {f}")
-                    continue
-                if lay == "flux2":
-                    if a and a not in GGUF_ARCHS:
-                        _log(f"GGUF declares architecture '{a}' but its tensors ARE a "
-                             f"FLUX.2 transformer (mislabelled by the conversion "
-                             f"tool) -> loaded anyway: {f}")
-                # layout undetermined -> the declared architecture stays the judge.
-                elif a and a not in GGUF_ARCHS:
-                    _log(f"checkpoint skipped (GGUF architecture '{a}', this build only "
-                         f"loads {sorted(GGUF_ARCHS)}; that model needs its own pipeline "
-                         f"and text encoder/VAE): {f}")
+            if f.lower().endswith((".safetensors", ".gguf", ".sft")):
+                why = _flux3_file_refusal(fp)
+                if why:
+                    if _file_family(fp) == "flux2":
+                        flux2_skips += 1
+                        _dbg(f"checkpoint skipped (FLUX.2): {f}")
+                    else:
+                        _log(f"checkpoint skipped ({why}): {f}")
                     continue
             seen.add(f)
             out.append(rel)
-    for dim, n in sorted(variant_skips.items()):
-        _log(_variant_skip_summary(n, dim))
+    if flux2_skips:
+        _log(f"{flux2_skips} FLUX.2 checkpoint(s) skipped in the checkpoint folder(s): "
+             f"they run in crispz-klein. crispz-flux3 lists FLUX.3 Image Klein "
+             f"transformers only.")
     return sorted(out)
 
 
 def checkpoint_refusal(name):
-    """A reason (str) why THIS checkpoint is not selectable, otherwise None.
-
-    The same verdict as list_checkpoints, but for a single file and with the full
-    instructions: this is what someone reads who is trying to pick that model and not
-    another (a preset written before a base repo change, a moved checkpoint, a GGUF of
-    another architecture). None for an HF repo / diffusers folder: only single-file
-    checkpoints go through this filter.
-"""
+    """A reason (str) why THIS checkpoint is not selectable, otherwise None (an HF repo /
+    diffusers folder is never refused here)."""
     if not name:
         return None
     path = name if os.path.isabs(name) else resolve_checkpoint(name)
@@ -2392,23 +2479,7 @@ def checkpoint_refusal(name):
     if not os.path.isfile(path):
         return (f"no such file in the checkpoint folder(s) "
                 f"({', '.join(_checkpoint_dirs())})")
-    if _is_gguf_path(path):
-        dim = _gguf_hidden_dim(path)
-        if _flux2_variant_mismatch(dim):
-            return _variant_refusal(dim)
-        lay, arch = _gguf_layout(path), _gguf_arch(path)
-        if lay == "foreign":
-            return _gguf_layout_unsupported(path)
-        # As in list_checkpoints: the layout beats the declared architecture.
-        if lay != "flux2" and arch and arch not in GGUF_ARCHS:
-            return (f"its GGUF architecture is '{arch}' and this build only loads "
-                    f"{sorted(GGUF_ARCHS)}; that model needs its own pipeline and "
-                    f"text encoder/VAE")
-        return None
-    dim = _flux2_hidden_dim(path)
-    if _flux2_variant_mismatch(dim):
-        return _variant_refusal(dim)
-    return _safetensors_unsupported(path)
+    return _flux3_file_refusal(path)
 
 
 def resolve_checkpoint(name):
@@ -3415,33 +3486,30 @@ _ENCODER_TRIM_GB = {"4B": 2.2, "9B": 4.0}
 _TRANSFORMER_VRAM_GB = {"4B": 7.2, "9B": 18.2}
 
 
-def _base_vram_need_gb(base=None):
-    """VRAM asked for under 'none' offload by what will REALLY be resident, or None when
-    the variant is unknown (in which case we stay out of it).
+# FLUX.3 Image Klein, measured from the repo's files (GiB): the Qwen3-VL-4B text encoder
+# 8.27 + the VAE 0.31, plus the transformer at its precision. The sums match the
+# "peak after load" of the diffusers blog (18.8 bf16 / 14.35 fp8r / 13.4 nvfp4), which is
+# what 'none' offload keeps resident.
+_FLUX3_REST_GB = 8.6
+_FLUX3_TRANSFORMER_GB = {"bf16": 10.3, "fp8r": 5.85, "nvfp4": 4.95}
 
-    A single-file override does not make the model smaller, except as a GGUF: an FP8/INT8
-    .safetensors is DEQUANTIZED to bf16 at load time and weighs as much as the original
-    transformer (16.9 GB on disk -> 18.2 GB in VRAM, measured on a klein-9B). Counting the
-    file, or worse skipping the check as the first version of this guard did, let through a
-    configuration that does not fit -- and the failure comes at the first diffusion step,
-    after five minutes of dequantization, on a mute "CUDA error: unknown error".
+
+def _base_vram_need_gb(base=None):
+    """VRAM asked for under 'none' offload by what will REALLY be resident.
+
+    A single-file override weighs its file when it stays quantized (GGUF, BFL fp8r /
+    nvfp4), and the bf16 transformer otherwise (an FP8 .safetensors of another scheme
+    is dequantized at load time).
 """
-    v = _FLUX2_VARIANTS.get(_base_hidden_dim(base))
-    total = _BASE_VRAM_GB.get(v)
-    if not total:
-        return None
-    if _ENCODER_TRIMMED:
-        total -= _ENCODER_TRIM_GB.get(v, 0.0)
     t = ZIMAGE_TRANSFORMER
     if not t:
-        return total
-    rest = total - _TRANSFORMER_VRAM_GB.get(v, 0.0)      # text encoder + VAE
-    if _is_gguf_path(t):                                  # stays quantised in VRAM
+        return _FLUX3_REST_GB + _FLUX3_TRANSFORMER_GB.get(PRECISION, 10.3)
+    if _is_gguf_path(t) or cz_flux3._bfl_quant_of(t):
         try:
-            return rest + os.path.getsize(t) / 1024 ** 3
+            return _FLUX3_REST_GB + os.path.getsize(t) / 1024 ** 3
         except OSError:
-            return total
-    return rest + _TRANSFORMER_VRAM_GB.get(v, 0.0)        # bf16, dequantised or not
+            pass
+    return _FLUX3_REST_GB + _FLUX3_TRANSFORMER_GB["bf16"]
 
 
 def _total_vram_gb():
@@ -3603,9 +3671,20 @@ def _load_transformer(path=None, base=None):
     pipe passes its own file (GGUF, FP8 Rapid-AIO...) + its edit repo (zimage_omni_base) for
     the architecture.
 """
-    from diffusers import Flux2Transformer2DModel
     path = ZIMAGE_TRANSFORMER if path is None else path
     base = BASE_REPO if base is None else base
+    # crispz-flux3: every transformer goes through cz_flux3 (diffusers converts BFL's and
+    # ComfyUI's single-file layouts; BFL fp8r/nvfp4 and GGUF stay quantized). The FLUX.2
+    # path below is crispz-klein's and is no longer reached.
+    if path and _is_single_file(path):
+        why = _flux3_file_refusal(path)
+        if why:
+            raise RuntimeError(f"{os.path.basename(path)}: {why}")
+    label = (f"transformer {os.path.basename(path)}" if path
+             else f"transformer {base} ({PRECISION})")
+    return _load_monitor(label, lambda: cz_flux3.load_transformer(
+        base, DTYPE, precision=PRECISION, single_file=path or None))
+    from diffusers import Flux2Transformer2DModel  # noqa: E501  (unreachable, kept for merges)
     if path:
         if _is_single_file(path):
             # Guard: a file that cannot be loaded (a stray LoRA, an FP8, a quantized
@@ -4271,7 +4350,7 @@ def _ensure_base():
 """
     global _BASE_PIPE, _DERIVED, _LOADED_KEY, _BASE_SCHED_CONFIG, _APPLIED_LORAS
     global _TEXT_ENCODER_ACTIVE
-    key = (BASE_REPO, ZIMAGE_TRANSFORMER, OFFLOAD_MODE)
+    key = (BASE_REPO, ZIMAGE_TRANSFORMER, OFFLOAD_MODE, PRECISION)
     _dbg(f"_ensure_base key={key} cached={_LOADED_KEY}")
     if _BASE_PIPE is not None and _LOADED_KEY == key:
         if _apply_loras(_BASE_PIPE):
@@ -4288,41 +4367,29 @@ def _ensure_base():
             return _BASE_PIPE
         _dbg("base pipeline: key changed -> free + reload")
         free_vram()
-    from diffusers import Flux2KleinPipeline
     t0 = time.time()
-    kwargs = {}
-    if ZIMAGE_TRANSFORMER:
-        kwargs["transformer"] = _load_transformer()
-    # A replacement encoder: checked on the config then loaded with the repo's class.
-    # An encoder that does not suit (the repo went from 4B to 9B since the choice, an
-    # unreadable folder) is dropped WITH a log line, and the metadata says so.
+    tr = None
+    if ZIMAGE_TRANSFORMER or PRECISION != "bf16":
+        tr = _load_transformer()
+    # A replacement text encoder is a FLUX.2 feature (a Qwen3 of the same width): FLUX.3
+    # reads 8 hidden states of a Qwen3-VL-4B and nothing else fits that slot yet. The
+    # setting is kept (prefs stay valid) but not applied, and that is said.
     _TEXT_ENCODER_ACTIVE = ""
     if TEXT_ENCODER:
-        _why = _text_encoder_problem(TEXT_ENCODER)
-        if not _why:
-            try:
-                kwargs["text_encoder"] = _load_monitor(
-                    f"text encoder {_encoder_label(TEXT_ENCODER)}",
-                    lambda: _load_text_encoder(TEXT_ENCODER))
-                _TEXT_ENCODER_ACTIVE = TEXT_ENCODER
-            except Exception as e:
-                _why = f"it failed to load ({type(e).__name__}: {e})"
-        if _why:
-            _log(f"text encoder {_encoder_label(TEXT_ENCODER)} NOT used: {_why}. "
-                 f"{BASE_REPO}'s own encoder runs instead; the image metadata says so "
-                 f"(text_encoder_not_applied).")
-        else:
-            _log(f"text encoder: {_encoder_label(TEXT_ENCODER)} replaces {BASE_REPO}'s "
-                 f"own (tokenizer, VAE and transformer unchanged)")
+        _log(f"text encoder {_encoder_label(TEXT_ENCODER)} NOT used: replacing the encoder "
+             f"is not supported on FLUX.3 yet. {BASE_REPO}'s own Qwen3-VL-4B runs; the "
+             f"image metadata says so (text_encoder_not_applied).")
     _need = _base_vram_need_gb()
     _off_label = (f"auto->{_resolve_auto()}" if OFFLOAD_MODE == "auto" else OFFLOAD_MODE)
-    _log(f"loading FLUX.2 Klein base: {BASE_REPO} (offload={_off_label}, dtype=bf16"
+    _log(f"loading FLUX.3 Image Klein ({cz_flux3.variant_of(BASE_REPO)}): {BASE_REPO} "
+         f"(offload={_off_label}, dtype=bf16, transformer="
+         f"{'single-file' if ZIMAGE_TRANSFORMER else PRECISION}"
          + (f", ~{_need:.0f} GB of weights" if _need else "")
          + ") ... first run downloads it from HF, then cached")
     try:
-        pipe = _load_monitor(f"FLUX.2 Klein base {BASE_REPO}",  # noqa: E128
-                             lambda: Flux2KleinPipeline.from_pretrained(BASE_REPO, torch_dtype=DTYPE,
-                                                                        **kwargs))
+        pipe = _load_monitor(f"FLUX.3 Image Klein {BASE_REPO}",  # noqa: E128
+                             lambda: cz_flux3.load(BASE_REPO, dtype=DTYPE, precision=PRECISION,
+                                                   transformer=tr))
     except Exception as e:
         hint = _hf_access_hint(BASE_REPO, e)
         if hint:
@@ -4385,7 +4452,8 @@ def _ensure_base():
     _BASE_PIPE = pipe
     _DERIVED = {"txt2img": pipe}
     _LOADED_KEY = key
-    _log(f"FLUX.2 Klein base ready in {time.time() - t0:.1f}s (sampler={SAMPLER}/{SCHEDULE})")
+    _log(f"FLUX.3 Image Klein ready in {time.time() - t0:.1f}s ({cz_flux3.variant_of(BASE_REPO)}, "
+         f"{cz_flux3.DEFAULTS[cz_flux3.variant_of(BASE_REPO)]['steps']} steps advised)")
     return pipe
 
 
@@ -4406,6 +4474,12 @@ def get_pipe(kind="img2img"):
     if kind in _DERIVED:
         _dbg(f"get_pipe('{kind}'): reuse derived")
         return _DERIVED[kind]
+    if isinstance(base, cz_flux3.Flux3Pipe):
+        # FLUX.3: ONE object does everything -- img2img (strength = SDEdit on the flow
+        # path) and inpaint (mask = per-step latent blending) live in the adapter. No
+        # derived pipeline, no second copy of anything.
+        _DERIVED[kind] = base
+        return base
     # `Flux2KleinPipeline` does NOT expose `strength`: its `image` is a reference
     # conditioning (Kontext-style), not a noised start. So img2img goes through the INPAINT
     # pipeline with a full white mask (injected by _qwen_call). A single derived object
