@@ -381,7 +381,6 @@ if __name__ == "__main__":
                test_int8_convrot_roundtrip, test_aio_bundle_filtered,
                test_comfy_prefix_is_stripped, test_unprefixed_keys_left_alone,
                test_bf16_prefixed_is_detected_and_stripped,
-               test_prefixed_single_file_is_loaded_as_a_state_dict,
                test_convert_device_cpu_is_respected,
                test_dequant_result_always_lands_on_cpu,
                test_foreign_arch_rejected, test_lora_and_svdq_still_unsupported,

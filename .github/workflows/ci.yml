@@ -45,6 +45,6 @@ jobs:
           # against CUDA torch -> "operator torchvision::nms does not exist" at
           # import time, which takes transformers' vision classes down with it.
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install -r requirements.txt
+          pip install -r requirements.txt pytest
       - name: Run test suite
         run: python tools/run_tests.py -v

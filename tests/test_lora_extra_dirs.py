@@ -89,10 +89,11 @@ def test_an_absolute_path_is_left_alone():
 def test_the_setter_takes_a_list_or_a_semicolon_string():
     old = list(P.LORAS_EXTRA_DIRS)
     try:
-        P.set_loras_extra_dirs("X:/a;Y:/b")
-        assert P.LORAS_EXTRA_DIRS == ["X:/a", "Y:/b"], P.LORAS_EXTRA_DIRS
-        P.set_loras_extra_dirs(["X:/a", "X:/a", "Z:/c"])     # deduplicated
-        assert P.LORAS_EXTRA_DIRS == ["X:/a", "Z:/c"], P.LORAS_EXTRA_DIRS
+        # no drive letters: on Linux (the CI) os.pathsep is ':' and "X:/a" splits in two
+        P.set_loras_extra_dirs("/m/a;/m/b")
+        assert P.LORAS_EXTRA_DIRS == ["/m/a", "/m/b"], P.LORAS_EXTRA_DIRS
+        P.set_loras_extra_dirs(["/m/a", "/m/a", "/m/c"])     # deduplicated
+        assert P.LORAS_EXTRA_DIRS == ["/m/a", "/m/c"], P.LORAS_EXTRA_DIRS
         P.set_loras_extra_dirs("")
         assert P.LORAS_EXTRA_DIRS == [], P.LORAS_EXTRA_DIRS
     finally:
