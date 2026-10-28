@@ -47,6 +47,10 @@ FLUX3_DISTILLED = "black-forest-labs/flux-3-image-klein"
 FLUX3_BASE = "black-forest-labs/flux-3-image-klein-base"
 FLUX3_REPOS = (FLUX3_DISTILLED, FLUX3_BASE)
 
+# The transformer's hidden width (24 heads x 128). The same as FLUX.2-klein-4B's, which is
+# why nothing in crispz-flux3 tells models apart by width (see family_from_keys).
+HIDDEN_SIZE = 3072
+
 # The distilled checkpoint is a flow map: 16 steps, no CFG. The base one: 50 steps,
 # CFG 3.5 (BFL's model card; the diffusers blog shows 5.0 as an example value).
 DEFAULTS = {"distilled": {"steps": 16, "guidance": 1.0},
@@ -333,6 +337,14 @@ class Flux3Pipe:
             self._mp.update_components(**{name: value})
         else:
             setattr(self._mp, name, value)
+
+    def register_modules(self, **kw):
+        """DiffusionPipeline's name for 'these are the components now'. cz_pipeline's
+        transformer hot swap calls it with transformer=...: each one goes through
+        __setattr__, so the modular pipeline is updated (update_components), not a
+        shadow attribute on the adapter."""
+        for name, value in kw.items():
+            setattr(self, name, value)
 
     @property
     def config(self):
@@ -629,17 +641,29 @@ def load_text_encoder(repo, dtype, token=None):
     return enc, tok
 
 
+def is_gguf(path):
+    return isinstance(path, str) and path.lower().endswith(".gguf")
+
+
 def load_transformer(repo, dtype, precision="bf16", single_file=None, token=None):
-    """The FLUX.3 transformer: a single-file override first (a community .safetensors,
-    BFL's or ComfyUI's layout, converted by diffusers), else the repo's precision
-    variant (fp8r / nvfp4 from variants/), else transformer/ in bf16."""
+    """The FLUX.3 transformer: a single-file override first (a community .safetensors in
+    BFL's or ComfyUI's layout, converted by diffusers; a BFL fp8r / nvfp4 file, kept
+    quantized; a .gguf, kept quantized through GGUFQuantizationConfig, e.g. the
+    unsloth/flux-3-image-klein-GGUF files), else the repo's precision variant (fp8r /
+    nvfp4 from variants/), else transformer/ in bf16.
+
+    `config=repo, subfolder="transformer"` on every single-file load: without it,
+    from_single_file goes looking for a default repo on the hub to learn the
+    architecture, which fails offline and on a gated repo without a token."""
     from diffusers import Flux3Transformer2DModel
-    if single_file:
+    if single_file is not None:
         kw = {"config": repo, "subfolder": "transformer", "torch_dtype": dtype}
         if token:
             kw["token"] = token
-        quant = _bfl_quant_of(single_file)
-        if quant:
+        if is_gguf(single_file):
+            from diffusers import GGUFQuantizationConfig
+            kw["quantization_config"] = GGUFQuantizationConfig(compute_dtype=dtype)
+        elif _bfl_quant_of(single_file):
             from diffusers import BFLQuantizationConfig
             kw["quantization_config"] = BFLQuantizationConfig(compute_dtype=dtype)
         return Flux3Transformer2DModel.from_single_file(single_file, **kw)
@@ -661,7 +685,10 @@ def load_transformer(repo, dtype, precision="bf16", single_file=None, token=None
 
 
 def _bfl_quant_of(path):
-    """'fp8r' / 'nvfp4' when a single file carries BFL's scale tensors, else None."""
+    """'fp8r' / 'nvfp4' when a single file carries BFL's scale tensors, else None (a
+    .gguf, a state dict, an unreadable file)."""
+    if not isinstance(path, str) or is_gguf(path):
+        return None
     try:
         import struct
         with open(path, "rb") as f:

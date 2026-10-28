@@ -64,7 +64,10 @@ output/
 *.tsv
 
 # --- Local test images (experiments, not versioned) ---
-tests/
+tests/*
+# ... but the test SUITE is versioned (new test files were lost to a bare 'tests/' once:
+# a directory rule cannot be negated file by file, 'tests/*' can).
+!tests/*.py
 
 # --- Style thumbnails (Fooocus samples, local, ~8 MB, not versioned) ---
 styles/samples/

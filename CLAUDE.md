@@ -47,7 +47,14 @@ pip install "diffusers==0.42.1" "transformers>=5,<6" accelerate peft gguf senten
 python -m pytest tests -q --ignore=tests/test_klein_e2e.py
 ```
 
+Sous Windows, le venv validé est `.venv-test` à la racine (Python 3.13, torch 2.14 cpu,
+diffusers 0.42.1, transformers 5.21) : `.venv-test/Scripts/python -m pytest tests -q
+--ignore=tests/test_klein_e2e.py`.
+
 Pièges déjà rencontrés :
+- `.gitignore` excluait tout `tests/` (règle héritée pour des images locales) : le premier
+  `tests/test_flux3_adapter.py` n'a jamais été commité et a dû être réécrit. Corrigé en
+  `tests/*` + `!tests/*.py` ; vérifier `git status` après tout nouveau fichier de test.
 - torchvision doit venir du MÊME index que torch (`+cpu`), sinon
   `operator torchvision::nms does not exist` casse tout import transformers.
 - diffusers 0.42.1 exige `huggingface-hub>=1.32`, incompatible avec transformers 4.x
@@ -95,9 +102,17 @@ FLUX.2-klein-4B : l'ancien tri 4B/9B laisserait passer un fichier FLUX.2.
 Piège diffusers : `ModularPipeline.blocks` renvoie une **copie** ; les vrais blocs sont
 dans `mp._blocks` (c'est là qu'on rattache `hook.owner`).
 
-## 5. État au 28/10/2026 (branche `wip/flux3-engine`, commit 8bd62a6)
+## 5. État au 28/10/2026 (branche `wip/flux3-engine`, lot A livré)
 
-Fait :
+Fait au lot A (voir §6 pour le détail) : `get_pipe` rend la base pour img2img/inpaint,
+sampler Euler imposé et dit une fois, `Flux3Pipe.register_modules`, GGUF via
+`GGUFQuantizationConfig`, code FLUX.2 inatteignable supprimé de `_load_transformer`,
+`_trim_text_encoder` annonce qu'il ne fait rien sur Qwen3-VL, messages de refus par famille
+(un fichier FLUX.2 = "runs in crispz-klein"), `model_info['variant']` = la famille
+(`FLUX.3` / `FLUX.2`). Tests : `tests/test_flux3_adapter.py` (16) et
+`tests/test_flux3_wiring.py` (12), verts, composants miniatures dans `tests/flux3_tiny.py`.
+
+Fait avant (commit 8bd62a6) :
 - `main` (f558fb7) : squelette, renommage crispz-klein vers crispz-flux3, FORK.md.
 - `cz_flux3.py` : moteur complet ; `tests/test_flux3_adapter.py` : 12/12 sur CPU
   (composants aléatoires miniatures, aucun téléchargement).
@@ -109,27 +124,38 @@ Fait :
   des checkpoints par famille (`_flux3_file_refusal`, `list_checkpoints`,
   `checkpoint_refusal`), refus des LoRAs FLUX.2 (`_lora_unsupported`).
 
-Suite de tests mesurée sur ce commit : **491 passent, 24 échouent**. Les 24 échecs
-testent le comportement FLUX.2 (4B/9B, dequant FP8 ComfyUI, encodeur trim 9B) :
+Suite de tests mesurée après le lot A : **498 passent, 33 échouent** (avant le lot A :
+491 / 24). Les 33 échecs testent tous le comportement FLUX.2 (4B/9B par largeur, dequant
+FP8 ComfyUI, encodeur trim 9B, libellés de menu "4B"/"9B") ; les 9 nouveaux viennent de la
+garde par famille et des nouveaux messages du lot A, et sont attendus :
 
 ```
 test_edit_lora_presets::test_variant_guard_refuses_the_other_model
 test_encoder_trim::test_the_budget_follows_the_deed_not_the_intent
 test_encoder_trim::test_a_trimmed_9B_still_gets_the_offload_it_needs
-test_klein_variant::test_a_4B_lora_on_a_9B_base_is_refused_in_one_sentence
+test_klein_variant::(4 tests : mismatch_both_ways, summary_once, unknown_base,
+                     4B_lora_on_9B)                               [3 nouveaux]
 test_lokr_merge::test_a_lokr_is_kept_out_of_the_peft_set
-test_lora_dialect::(5 tests)
-test_lora_extra_dirs::test_the_setter_takes_a_list_or_a_semicolon_string
+test_lora_dialect::(6 tests)                                      [1 nouveau]
 test_lora_offload::(2 tests)
+test_model_labels::(3 tests : le menu dit FLUX.3/FLUX.2, plus 4B/9B) [3 nouveaux]
 test_precache_variants::(2 tests)
 test_preset_model_switch::(7 tests)
-test_quant_formats::test_prefixed_single_file_is_loaded_as_a_state_dict
-test_quant_formats::test_list_checkpoints_accepts_the_mislabelled_gguf
+test_quant_formats::(5 tests : prefixed_single_file, mislabelled_gguf,
+                     gguf_arch_and_layout, gguf_layout_beats_mislabelled,
+                     gguf_qwen_diffusers_layout)                  [3 nouveaux]
 ```
+(`test_lora_extra_dirs::test_the_setter...`, dans la liste d'avant, passe maintenant.)
 
 ## 6. Actions restantes, par lot
 
-### Lot A : finir le branchement de cz_pipeline.py
+### Lot A : finir le branchement de cz_pipeline.py (FAIT le 28/10/2026)
+
+Livré tel que décrit ci-dessous, plus : le `.gitignore` corrigé (§3), `_hf_token()` passé
+au chargeur du transformer, un fichier ComfyUI "scaled" FP8 est transmis tel quel à
+diffusers avec une ligne de log (le dequant de crispz-klein n'est pas porté : FLUX.3 a
+ses propres fp8r / nvfp4). Point 6 : vérifié, Qwen3VLForConditionalGeneration range ses
+blocs sous `model.language_model.layers`, la fonction sort en l'annonçant.
 
 1. `get_pipe(kind)` : si la base est un `cz_flux3.Flux3Pipe`, `img2img` et `inpaint`
    renvoient la base elle-même (`_DERIVED[kind] = base`), sans `Flux2KleinInpaintPipeline`
