@@ -1,0 +1,253 @@
+# crispz-flux3 : cahier des charges pour Claude Code
+
+Ce fichier est lu automatiquement par Claude Code à l'ouverture du repo. Il décrit
+le contexte, les règles, l'état exact du portage FLUX.3 et les actions restantes,
+dans l'ordre, avec leurs critères d'acceptation.
+
+## 1. Contexte et objectif
+
+crispz-flux3 est un fork de crispz-klein (studio Gradio local, FLUX.2 Klein) porté sur
+**FLUX.3 Image Klein** (`black-forest-labs/flux-3-image-klein`, 5,6B, sorti le
+15/10/2026, FLUX Kommunity License, repo HF à accès conditionnel).
+
+Objectif de la v0.1.0 : la même surface fonctionnelle que crispz-klein (txt2img, édition
+multi-références, img2img/refine/upscale, inpaint/outpaint, détailleur, LoRAs FLUX.3,
+checkpoints single-file FLUX.3, CLI et protocole v1) sur FLUX.3, installable via
+`install.bat`, testable sur RTX 5090 (32 Go).
+
+Hors périmètre v0.1.0 : prompt upsampler `flux-3-image-klein-pup` (9B, ~28 Go),
+remplacement de l'encodeur texte, samplers autres qu'Euler, bounding boxes dans l'UI
+(prévus en v0.2, voir §8).
+
+## 2. Règles de travail (non négociables)
+
+- **Commits au nom de Mike** : `Mike Castro Demaria <supersoniquestudio@gmail.com>`,
+  auteur et committer. **Aucune** ligne `Co-Authored-By: Claude` ni lien de session.
+- Jamais de tiret cadratin (le caractère U+2014) ni d'emoji, ni dans le code, ni dans les
+  commits, ni dans la doc. Utiliser `:` ou `,`.
+- Travail **étape par étape** : à la fin de chaque lot (§5), s'arrêter, résumer, et
+  attendre la validation de Mike avant le lot suivant.
+- Branche de travail : `wip/flux3-engine`. Ne jamais pousser sur `main` avant le lot 6.
+- Style du code existant : anglais, commentaires longs qui expliquent le POURQUOI
+  (mesures, incidents datés). Le conserver. Toute dégradation est **annoncée** dans le
+  log (`_log`), jamais silencieuse (règle maison).
+- Garder les noms publics du module (`ZIMAGE_TRANSFORMER`, `generate_omni`, `_qwen_call`,
+  `BASE_REPO`...) : cz_ui, cz_cli et cz_protocol les importent, et ils réduisent les
+  conflits de merge depuis crispz-klein (remote `klein`).
+
+## 3. Environnement de test
+
+Pas de GPU nécessaire pour les tests unitaires. Pile validée sur CPU (Python 3.13) :
+
+```bash
+python -m venv .venv-test && . .venv-test/bin/activate
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+pip install "diffusers==0.42.1" "transformers>=5,<6" accelerate peft gguf sentencepiece \
+            spandrel "gradio>=4.44,<6" pillow numpy scipy fastapi uvicorn pytest
+python -m pytest tests -q --ignore=tests/test_klein_e2e.py
+```
+
+Pièges déjà rencontrés :
+- torchvision doit venir du MÊME index que torch (`+cpu`), sinon
+  `operator torchvision::nms does not exist` casse tout import transformers.
+- diffusers 0.42.1 exige `huggingface-hub>=1.32`, incompatible avec transformers 4.x
+  (`<1.0`) : transformers **5.x obligatoire**.
+- Le repo officiel est gated (401 sans token). Pour lire les configs sans token :
+  le miroir `unsloth/flux-3-image-klein-FP8` (configs identiques, `modular_model_index.json`,
+  `transformer/config.json`, `vae/config.json`, `text_encoder/config.json`).
+
+## 4. Architecture retenue (décisions déjà prises, ne pas rediscuter)
+
+**Un adaptateur plutôt qu'une réécriture.** `cz_flux3.py` contient `Flux3Pipe`, qui
+enveloppe le `Flux3DistilledModularPipeline` / `Flux3ModularPipeline` de diffusers derrière
+la convention d'appel Flux2Klein utilisée par les ~30 call sites de `cz_pipeline.py` :
+
+```
+pipe(prompt=, image=, mask_image=, strength=, width=, height=, num_inference_steps=,
+     generator=, guidance_scale=, negative_prompt=, prompt_embeds=,
+     callback_on_step_end=, output_type=).images
+```
+
+Points clés de `Flux3Pipe` (déjà codés et testés) :
+- Chaîne de blocs = blocs officiels **moins** `prompt_upsampler` et `text_encoder`, plus
+  un bloc `crispz_hook` à la fin de chaque boucle de débruitage.
+- L'encodage texte (Qwen3-VL-4B, 8 couches cachées empilées, padding multiple de 80) est
+  fait par `encode_prompt()` : le cache d'embeddings de cz_pipeline fonctionne tel quel.
+- **img2img** : SDEdit sur le chemin flow-matching (`img2img_schedule`) : on encode
+  l'image, on la bruite au premier sigma conservé, on passe la queue du planning
+  (sigmas non décalés, le scheduler applique lui-même le shift 6,93).
+- **inpaint** : à chaque pas, hors masque, les tokens sont remis à l'image d'origine
+  bruitée au sigma atteint (masque max-poolé sur la grille de 16 px). Un masque tout
+  blanc = img2img simple.
+- `callback_on_step_end(pipe, i, t, {"latents"})` et `pipe._interrupt` (Stop, garde VRAM,
+  aperçu live) via le hook ; un Stop décode les derniers latents.
+- Offload `model` / `sequential` via accelerate, avec les noms de DiffusionPipeline
+  (`enable_model_cpu_offload`, `maybe_free_model_hooks`, `_all_hooks`, `remove_all_hooks`).
+- Attributs inconnus redirigés vers le pipeline modulaire (`pipe.transformer`,
+  `pipe.load_lora_weights` via `Flux3LoraLoaderMixin`...).
+
+**Garde par FAMILLE, pas par dimension.** FLUX.3 a la même largeur cachée (3072) que
+FLUX.2-klein-4B : l'ancien tri 4B/9B laisserait passer un fichier FLUX.2.
+`cz_flux3.family_from_keys()` lit les noms de tenseurs (marqueurs
+`early_stream_modulations.`, `mode_blocks.`... contre `double_blocks.`,
+`single_stream_modulation.`...).
+
+Piège diffusers : `ModularPipeline.blocks` renvoie une **copie** ; les vrais blocs sont
+dans `mp._blocks` (c'est là qu'on rattache `hook.owner`).
+
+## 5. État au 28/10/2026 (branche `wip/flux3-engine`, commit 8bd62a6)
+
+Fait :
+- `main` (f558fb7) : squelette, renommage crispz-klein vers crispz-flux3, FORK.md.
+- `cz_flux3.py` : moteur complet ; `tests/test_flux3_adapter.py` : 12/12 sur CPU
+  (composants aléatoires miniatures, aucun téléchargement).
+- `cz_pipeline.py`, partiel : repo par défaut FLUX.3, clés `flux3_model`,
+  `flux3_transformer`, `flux3_precision` (bf16 / fp8r / nvfp4), chargement par
+  `cz_flux3.load()` dans `_ensure_base()` (clé de cache incluant `PRECISION`), guidance et
+  négatif réels sur la variante base (`_cfg`, `_qwen_call`), estimation VRAM
+  (`_base_vram_need_gb`), `_load_transformer` redirigé vers cz_flux3, listing et refus
+  des checkpoints par famille (`_flux3_file_refusal`, `list_checkpoints`,
+  `checkpoint_refusal`), refus des LoRAs FLUX.2 (`_lora_unsupported`).
+
+Suite de tests mesurée sur ce commit : **491 passent, 24 échouent**. Les 24 échecs
+testent le comportement FLUX.2 (4B/9B, dequant FP8 ComfyUI, encodeur trim 9B) :
+
+```
+test_edit_lora_presets::test_variant_guard_refuses_the_other_model
+test_encoder_trim::test_the_budget_follows_the_deed_not_the_intent
+test_encoder_trim::test_a_trimmed_9B_still_gets_the_offload_it_needs
+test_klein_variant::test_a_4B_lora_on_a_9B_base_is_refused_in_one_sentence
+test_lokr_merge::test_a_lokr_is_kept_out_of_the_peft_set
+test_lora_dialect::(5 tests)
+test_lora_extra_dirs::test_the_setter_takes_a_list_or_a_semicolon_string
+test_lora_offload::(2 tests)
+test_precache_variants::(2 tests)
+test_preset_model_switch::(7 tests)
+test_quant_formats::test_prefixed_single_file_is_loaded_as_a_state_dict
+test_quant_formats::test_list_checkpoints_accepts_the_mislabelled_gguf
+```
+
+## 6. Actions restantes, par lot
+
+### Lot A : finir le branchement de cz_pipeline.py
+
+1. `get_pipe(kind)` : si la base est un `cz_flux3.Flux3Pipe`, `img2img` et `inpaint`
+   renvoient la base elle-même (`_DERIVED[kind] = base`), sans `Flux2KleinInpaintPipeline`
+   ni `from_pipe`. À insérer juste après le bloc `if kind in _DERIVED`.
+2. `_apply_sampler(pipe)` : sur un `Flux3Pipe`, ne rien changer (le distillé est une
+   flow map : chaque pas transmet au transformer le timestep suivant ; un sampler
+   multistep ou un planning remappé le casse). Logguer une seule fois si l'utilisateur a
+   choisi autre chose qu'`euler/sgm_uniform` (set `_SAMPLER_IGNORED_SAID`).
+3. `cz_flux3.Flux3Pipe.register_modules(**kw)` : à ajouter (utilisé par
+   `_swap_transformer`), délègue à `setattr` donc à `update_components`.
+4. `cz_flux3.load_transformer` : `.gguf` en single-file avec
+   `GGUFQuantizationConfig(compute_dtype=dtype)` (miroir `unsloth/flux-3-image-klein-GGUF`).
+5. Nettoyer `_load_transformer` : le code FLUX.2 inatteignable après le `return` doit
+   être supprimé ou clairement isolé (le `# noqa: E501` actuel est faux).
+6. `_trim_text_encoder` : vérifier qu'il ne touche à rien sur Qwen3-VL (attribut
+   `enc.model.layers` absent, donc sortie anticipée). Option v0.2 : tronquer à 33 couches
+   sur 36 (couche max lue = 32).
+7. Variantes de messages : `_variant_name`, `_variant_fix`, `_variant_skip_summary`,
+   `_variant_refusal`, `_FLUX2_VARIANTS` ne doivent plus produire de texte "4B/9B" pour
+   un fichier FLUX.3. Tout fichier FLUX.2 détecté = "runs in crispz-klein".
+8. Docstrings et logs restants "FLUX.2 Klein" dans les chemins actifs : à mettre à jour
+   (pas l'historique en commentaire).
+
+Acceptation : `tests/test_flux3_adapter.py` vert ; un nouveau test
+`tests/test_flux3_wiring.py` qui, avec un `Flux3Pipe` miniature injecté dans
+`cz_pipeline._BASE_PIPE`, fait passer `generate`, `generate_omni`, `process_one`
+(refine), `inpaint_run` et `outpaint` sans exception et avec la bonne taille de sortie.
+
+### Lot B : profils, presets et configuration
+
+1. **Piège** : `cz_core.profile_for_model()` matche par sous-chaîne et le profil `klein`
+   (4 steps) matcherait `flux-3-image-klein`. Remplacer dans `config-sample.txt` et les
+   défauts de `cz_core` par des profils `flux-3-image-klein-base` (50 steps, 3,5) placé
+   AVANT `flux-3-image-klein` (16 steps, 1,0) : premier match gagnant.
+2. `performance_presets` : Distilled (16 / 1,0), Fast (8 / 1,0, à mesurer), Base (50 / 3,5).
+3. `config-sample.txt` : remplacer toutes les clés et aides `klein_*` (lignes ~50 à 263)
+   par `flux3_model`, `flux3_transformer`, `flux3_precision`, `flux3_base_repos`, avec des
+   aides qui parlent de FLUX.3 (licence Kommunity, gated, `hf_token`, VRAM mesurée).
+4. `preferences.example.json` : `flux3_model`.
+5. `cz_edit_loras.py` : le catalogue de presets LoRA d'édition est FLUX.2 ; le vider pour
+   FLUX.3 (aucun LoRA d'édition publié à ce jour) avec un commentaire daté.
+
+Acceptation : `profile_for_model("black-forest-labs/flux-3-image-klein")` = (16, 1.0) ;
+`...-base` = (50, 3.5) ; test dédié.
+
+### Lot C : interface (cz_ui.py, environ 68 références)
+
+1. `KLEIN_BASE_4B/9B` deviennent `FLUX3_DISTILLED/FLUX3_BASE` (depuis cz_flux3) ;
+   `ZIMAGE_BASE_REPOS` lit `flux3_base_repos`.
+2. Le Radio "Klein family" `["4B", "9B"]` devient "FLUX.3 checkpoint"
+   `["Distilled", "Base"]` ; `_variant_of_repo` et `_apply_variant` suivent.
+3. Ajouter un Radio "Precision" `["bf16", "fp8r", "nvfp4"]` à côté, branché sur un
+   nouveau `cz_pipeline.set_precision()` (persisté dans les prefs, rechargement du seul
+   transformer via la clé de cache). nvfp4 : afficher qu'il faut Blackwell + flashinfer.
+4. `BASE_REPO_NOTES` : une note par repo (licence Kommunity : gratuit en commercial sous
+   5 M$ de CA ; gated ; VRAM bf16 environ 19 Go, fp8r 14,4, nvfp4 13,5).
+5. Onglet Edit : indiquer dans l'aide du prompt que les références se citent
+   `<ref_image_0>`, `<ref_image_1>`... (jusqu'à 10) ; relever la limite de références
+   de 4 à 10 si elle est codée en dur.
+6. Masquer ou griser les menus Sampler/Schedule (Euler imposé) et le choix d'encodeur
+   texte, avec une phrase d'explication.
+7. Textes visibles "Klein checkpoint", "FLUX.2" : remplacer.
+
+Acceptation : `tools/smoke_test.py` vert (22 checks, `build_ui()` compris) ;
+`tests/test_ui_binding_returns.py` vert.
+
+### Lot D : dépendances et installation
+
+1. `requirements.txt` : `diffusers==0.42.1` (PyPI, plus de git+commit),
+   `transformers>=5,<6`, `huggingface-hub>=1.32`, reste inchangé. Vérifier que gradio 5.50
+   s'installe avec hub 1.x (OK en local le 27/10).
+2. `requirements-lock.txt` : régénérer depuis un venv propre (torch cu128 côté Windows,
+   torchvision assorti).
+3. `install.bat` / `install.sh` : marqueur d'installation (aujourd'hui l'inpaint
+   Flux2) : tester l'import de `diffusers.modular_pipelines.Flux3DistilledAutoBlocks`.
+4. Vérifier les alertes Dependabot après la montée de versions (62 sur main au 27/10,
+   héritées de crispz-klein) et lister celles qui restent.
+
+Acceptation : installation propre dans un venv vierge ; `python -c "import app"` OK.
+
+### Lot E : tests
+
+1. Les 24 tests FLUX.2 listés au §5 : pour chacun, soit le réécrire pour FLUX.3 (même
+   intention, ex. "un LoRA de l'autre famille est refusé en une phrase"), soit le
+   supprimer avec une ligne dans le CHANGELOG qui dit pourquoi. Ne pas les désactiver
+   en silence.
+2. Nouveaux tests : famille des checkpoints et LoRAs sur des en-têtes safetensors
+   synthétiques (FLUX.2 refusé, FLUX.3 accepté, LoRA dans le dossier checkpoints
+   refusé), `set_precision`, profils (lot B).
+3. `tests/test_klein_e2e.py` (GPU) : le transformer en `tests/test_flux3_e2e.py`
+   (mêmes 6 étapes : chargement, gen, edit 1 ref, edit 2 refs, inpaint, upscale) pour
+   que Mike le lance sur la 5090 ; skip propre sans CUDA ou sans token HF.
+
+Acceptation : suite complète verte sur CPU, 0 échec, 0 test ignoré sans raison écrite.
+
+### Lot F : documentation et livraison
+
+1. README : retirer le bandeau WIP, décrire FLUX.3 (16 steps, références `<ref_image_N>`,
+   précisions, licence). Les captures d'écran et mesures viendront du e2e de Mike.
+2. FORK.md : mettre à jour la feuille de route (étapes faites) et les décisions (§4).
+3. CHANGELOG : entrée 0.1.0.
+4. Merge `wip/flux3-engine` dans `main` (fast-forward ou merge commit, au nom de Mike),
+   push, puis Mike teste sur la 5090 avec `tests/test_flux3_e2e.py`.
+5. Ensuite seulement : launcher Pinokio `crispz-flux3.pinokio` (Mike crée le repo vide,
+   on part de `crispz-klein.pinokio`).
+
+## 7. Validation GPU (Mike, RTX 5090)
+
+À mesurer et reporter dans FORK.md : temps de chargement, VRAM au repos et en pic,
+temps par image en bf16 / fp8r / nvfp4 à 1024x1024, 16 steps ; edit 1 et 2 références ;
+inpaint ; upscale. Vérifier visuellement : l'aperçu live (la matrice latent vers RGB de
+klein est réutilisée car le VAE est le même AutoencoderKLFlux2, à confirmer), le bouton
+Stop, l'inpaint sans couture visible.
+
+## 8. Après la v0.1.0 (pour mémoire)
+
+- Prompt upsampler : soit le pup 9B chargé puis déchargé avant la génération, soit le
+  `system_prompts.json` de BFL envoyé à Ollama via `cz_ollama.py` (plus léger).
+- Bounding boxes (grille 0-1000, `[y_min, x_min, y_max, x_max]`) dans l'onglet Edit.
+- Troncature de l'encodeur Qwen3-VL (33 couches sur 36).
+- Variante Base : vérifier la qualité du CFG et du négatif, régler les presets.
