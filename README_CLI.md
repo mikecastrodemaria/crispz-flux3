@@ -215,12 +215,16 @@ python app.py --reframe 16:9 -i square.png --prompt "extend the scenery" \
 python app.py --reframe 16:9 --reframe-fit cover -i square.png -o out/wide.png
 ```
 
-## Directional outpaint  — `--expand left,right,top,bottom` (the UI's "Expand sides")
+## Directional outpaint : `--expand left,right,top,bottom` (the UI's "Expand sides")
 
 ```bash
 python app.py --expand right,bottom -i photo.png --prompt "landscape, nature" \
     --gen-steps 8 --save-mode local --output-dir out
 # 'all' = the four sides; --expand-ratio 0.2 changes the growth per side
+# --expand-lora: the same sides through the FLUX.3 Outpaint LoRA (CivitAI, downloaded on
+# first use) on a gray canvas; the model sees the whole picture and continues it.
+# --expand-lora-weight 1.5 is the author's strength.
+python app.py --expand all -i photo.png --expand-lora --prompt "a wide beach at sunset"
 ```
 
 ## Inpaint with a mask file  — `--inpaint-mask mask.png`

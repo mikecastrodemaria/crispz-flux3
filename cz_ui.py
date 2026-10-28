@@ -320,7 +320,7 @@ from cz_pipeline import (  # noqa: E402,F401
     set_omni_model, check_omni_available, set_offload_mode, free_vram, set_loras,
     set_sampler, SAMPLER_CHOICES, set_schedule, SCHEDULE_CHOICES, SCHEDULE_INPUTS,
     _norm_schedule, set_force_ratio,
-    generate, generate_omni, inpaint_run, outpaint, outpaint_directions, reframe,
+    generate, generate_omni, inpaint_run, outpaint, outpaint_directions, outpaint_lora, reframe,
     txt2img_run, process_one, round_to_multiple, _reframe_canvas, _gen_meta,
     source_meta,
 )
@@ -1151,7 +1151,7 @@ def _ui_edit_lora_apply(label, weight, progress=gr.Progress()):
         return gr.update(), "Edit LoRA: none."
     try:
         if not cz_edit_loras.is_downloaded(name):
-            progress(0.0, desc=f"Downloading {name} from Hugging Face...")
+            progress(0.0, desc=f"Downloading {name} ({(cz_edit_loras.spec(name) or {}).get('repo', '')})...")
         cz_pipeline.set_edit_loras([(name, float(weight))])
     except Exception as e:
         _log(f"edit LoRA apply failed: {e}")
@@ -1679,11 +1679,14 @@ def _ui_remove_bg(image, history, save_mode, output_dir):
 
 def _ui_edit(mode, editor_value, dirs, ratio, fit, auto_describe, harmonize, harmonize_denoise,
              prompt, negative, styles, guidance, offload_mode, steps, strength, seed, save_mode,
-             output_dir, output_format, history, progress=gr.Progress(track_tqdm=True)):
+             output_dir, output_format, history, lora_weight=1.5,
+             progress=gr.Progress(track_tqdm=True)):
     """The unified Inpaint / Outpaint / Reframe tab. The `mode` picks the operation; the
     image (the editor), the prompt, the `steps` (the model's) and `strength` are shared.
       - Brush       : inpaints the painted area (inpaint_run)
       - Expand sides: a directional L/R/T/B outpaint (outpaint_directions)
+      - Expand sides (outpaint LoRA): the same sides, through the FLUX.3 Outpaint LoRA on
+        a gray canvas (outpaint_lora); `lora_weight` is its strength (1.5 advised)
       - Reframe     : a crop to the ratio, ~1 MP, Contain/Cover (reframe)
     auto_describe (outpaint/reframe): describes the central image through local BLIP (no
     Ollama) to guide the filling of the edges coherently.
@@ -1727,11 +1730,19 @@ def _ui_edit(mode, editor_value, dirs, ratio, fit, auto_describe, harmonize, har
                 tag, info = "reframe", f"Reframe {ratio} ({fit_mode})"
             elif m.startswith("expand"):
                 d = [x.lower() for x in (dirs or [])]
-                if not d:
+                if not d and not ("lora" in m and painted):
                     return [], "Pick at least one side (or Center).", history, history
-                res = outpaint_directions(bg, mask if painted else None, d,
-                                          full_prompt, steps, seed, strength=strength)
-                tag, info = "outpaint", f"Outpaint {'+'.join(d)}"
+                if "lora" in m:
+                    # The LoRA takes the user's words AFTER its trigger sentence; the
+                    # auto-description is a user prompt like any other here.
+                    res = outpaint_lora(bg, d, full_prompt, steps, seed,
+                                        mask=mask if painted else None,
+                                        weight=float(lora_weight))
+                    tag, info = "outpaint", f"Outpaint LoRA {'+'.join(d) or 'brush'} @{float(lora_weight):g}"
+                else:
+                    res = outpaint_directions(bg, mask if painted else None, d,
+                                              full_prompt, steps, seed, strength=strength)
+                    tag, info = "outpaint", f"Outpaint {'+'.join(d)}"
             else:  # Brush -> inpaint
                 if not painted:
                     return [], "Paint the area to change (brush).", history, history
@@ -4408,11 +4419,14 @@ def build_ui():
 
                         with gr.Tab("Inpaint / Outpaint"):
                             gr.Markdown("*One editor for everything: **Brush** = inpaint the painted "
-                                        "area · **Expand sides** = outpaint Left/Right/Top/Bottom · "
+                                        "area · **Expand sides** = outpaint Left/Right/Top/Bottom "
+                                        "(inpaint blend, or the FLUX.3 **Outpaint LoRA** on a gray "
+                                        "canvas: it sees the whole picture and continues it) · "
                                         "**Reframe** = new aspect ratio. Steps follow the model "
                                         "(Performance). Describe the result in the prompt.*")
                             edit_mode = gr.Radio(
-                                ["Brush (inpaint)", "Expand sides (outpaint)", "Reframe (ratio)"],
+                                ["Brush (inpaint)", "Expand sides (outpaint)",
+                                 "Expand sides (outpaint LoRA)", "Reframe (ratio)"],
                                 value="Brush (inpaint)", label="Mode")
                             inpaint_editor = gr.ImageEditor(
                                 type="pil", label="Image + mask (paint for Brush mode; click the "
@@ -4426,6 +4440,13 @@ def build_ui():
                                     choices=["Left", "Right", "Top", "Bottom"], value=[],
                                     label="Sides to expand (~30% each; blurred-edge fill + blend)")
                                 center_btn = gr.Button("Center (all sides)", size="sm")
+                            with gr.Group(visible=False) as outpaint_lora_group:
+                                outpaint_lora_w = gr.Slider(
+                                    0.5, 2.0, value=1.5, step=0.05, label="Outpaint LoRA weight",
+                                    info="CivitAI 'FLUX 3 Image Klein Outpaint LoRA' (153 MB, "
+                                         "downloaded on first use into the LoRA folder). The "
+                                         "author advises 1.5 on the distilled checkpoint; lower "
+                                         "values leave gray patches. Painted areas are redone too.")
                             with gr.Group(visible=False) as reframe_group:
                                 with gr.Row():
                                     reframe_ratio = gr.Dropdown(
@@ -5294,14 +5315,16 @@ def build_ui():
         # controls.
         edit_mode.change(
             lambda mo: (gr.update(visible="expand" in mo.lower()),
+                        gr.update(visible="lora" in mo.lower()),
                         gr.update(visible="reframe" in mo.lower())),
-            [edit_mode], [expand_group, reframe_group])
+            [edit_mode], [expand_group, outpaint_lora_group, reframe_group])
         center_btn.click(lambda: ["Left", "Right", "Top", "Bottom"], None, [inpaint_outpaint])
         edit_btn.click(_ui_edit,
                        [edit_mode, inpaint_editor, inpaint_outpaint, reframe_ratio, reframe_fit,
                         edit_autodescribe, edit_harmonize, edit_harmonize_denoise,
                         prompt, negative, styles, guidance, offload, gen_steps,
-                        edit_strength, seed, save_mode, output_dir, output_format, history],
+                        edit_strength, seed, save_mode, output_dir, output_format, history,
+                        outpaint_lora_w],
                        [out, report, history, history_gallery])
         # Fooocus-style Stop: it runs alongside Generate (a separate thread) and sets
         # the stop flag + interrupts the running denoise loop.

@@ -1,10 +1,10 @@
-"""Edit-LoRA presets on crispz-flux3 (0.1.0).
+"""Edit-LoRA presets on crispz-flux3.
 
-The catalogue is EMPTY: no edit-task LoRA exists for FLUX.3 Image Klein yet, and
-crispz-klein's two Consistence-Edit files are FLUX.2 (refused by family). What these tests
-lock down is the machinery around it, so the first FLUX.3 preset works the day it is
-declared:
-  - the shipped catalogue is empty and says nothing it cannot do (no name, no label);
+The catalogue ships ONE preset, the CivitAI "FLUX 3 Image Klein Outpaint LoRA"
+(2026-10-28); crispz-klein's two Consistence-Edit files are FLUX.2 (refused by family).
+What these tests lock down:
+  - the shipped preset: its trigger sentence, the author's weight, a CivitAI source that
+    downloads through cz_civitai (SHA256 carried) and lands under the stable name;
   - a preset declared in config.txt ('edit_loras') is picked up, by name and adapter name;
   - a FLUX.2 edit LoRA is refused by the family guard with one sentence;
   - picking a preset in the UI applies it at ITS advised weight and moves the slider.
@@ -42,11 +42,54 @@ class _Declared:
         return False
 
 
-def test_the_shipped_catalogue_is_empty_and_dated():
-    assert cz_edit_loras.EDIT_LORA_SPECS == {}
-    src = open(cz_edit_loras.__file__, encoding="utf-8").read()
-    assert "2026-10-28" in src, "an empty catalogue must say since when, and why"
+def test_the_shipped_catalogue_is_the_outpaint_lora():
+    assert list(cz_edit_loras.EDIT_LORA_SPECS) == [cz_edit_loras.OUTPAINT_PRESET]
+    s = cz_edit_loras.spec("Outpaint")
+    assert s["prompt"] == cz_edit_loras.OUTPAINT_PROMPT and "solid gray" in s["prompt"]
+    assert float(s["weight"]) == 1.5                  # the author's figure
+    assert s["civitai"]["versionId"] == 3407881 and len(s["civitai"]["sha256"]) == 64
+    assert s["weights"] in s["local_names"]           # a hand-downloaded copy is found
+    assert cz_edit_loras.local_path("Outpaint").endswith("flux3-outpaint.safetensors")
     assert cz_edit_loras.speed_names() == []          # no Lightning LoRA either
+
+
+def test_a_civitai_preset_downloads_through_cz_civitai():
+    """The CivitAI source: cz_civitai.download_model_file gets the spec's candidate (the
+    version id and the SHA256 to check), and the file is renamed to the stable
+    <adapter_name>.safetensors so local_path() finds it next time."""
+    import cz_civitai
+    tmp = tempfile.mkdtemp()
+    seen = {}
+
+    def fake_download(cand, dest_dir, api_key=None, progress=None):
+        seen["cand"] = dict(cand)
+        p = os.path.join(dest_dir, cand["fileName"])
+        open(p, "wb").close()
+        return {"success": True, "message": "ok", "path": p}
+
+    real = (cz_civitai.download_model_file, cz_edit_loras.lora_dirs, cz_edit_loras.edit_loras_dir)
+    cz_civitai.download_model_file = fake_download
+    cz_edit_loras.lora_dirs = lambda: [os.path.join(tmp, "loras")]
+    cz_edit_loras.edit_loras_dir = lambda: os.path.join(tmp, "loras", "_hf-edit")
+    try:
+        assert not cz_edit_loras.is_downloaded("Outpaint")
+        got = cz_edit_loras.resolve("Outpaint")
+        assert os.path.samefile(got, cz_edit_loras.local_path("Outpaint"))
+        assert seen["cand"]["versionId"] == 3407881 and seen["cand"]["sha256"]
+        assert cz_edit_loras.is_downloaded("Outpaint")
+        # a failed download is a clean error with CivitAI's message, no half file
+        cz_civitai.download_model_file = lambda *a, **k: {"success": False, "message": "401"}
+        os.remove(got)
+        try:
+            cz_edit_loras.resolve("Outpaint")
+        except RuntimeError as e:
+            assert "401" in str(e)
+        else:
+            raise AssertionError("a failed download must raise")
+    finally:
+        (cz_civitai.download_model_file, cz_edit_loras.lora_dirs,
+         cz_edit_loras.edit_loras_dir) = real
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_a_config_declared_preset_is_picked_up():

@@ -1,4 +1,5 @@
-"""The registry of the FLUX.3 Image Klein EDIT LoRAs.
+"""The registry of the FLUX.3 Image Klein EDIT LoRAs (one entry so far: the CivitAI
+Outpaint LoRA, see EDIT_LORA_SPECS).
 
 The upstream catalogue (crispz-qwen-edit) lists LoRAs trained for
 Qwen-Image-Edit 2509/2511. They are INCOMPATIBLE with FLUX.2 Klein: a different
@@ -28,13 +29,39 @@ import os
 from cz_core import CONFIG, _log, _dbg
 
 # The order = the dropdown's order. inputs = the number of images expected (2 = the input + a reference).
-# EMPTY on crispz-flux3 (2026-10-28): no edit-task LoRA has been published for FLUX.3 Image
-# Klein yet (the model is 13 days old). crispz-klein's two Consistence-Edit entries are kept
-# below as a merge reference: they are FLUX.2-klein files (double_blocks keys, 3072 / 4096
-# wide) and cz_pipeline._lora_unsupported refuses them here by family. Declare the first
-# FLUX.3 one in config.txt ('edit_loras') or here as soon as one exists; the download, the
-# local index and the dropdown wake up on their own.
-EDIT_LORA_SPECS = {}
+# A preset is either a Hugging Face file ('repo' + 'weights', hf_hub_download) or a CivitAI
+# file ('civitai': the search_loras() candidate shape, downloaded by
+# cz_civitai.download_model_file with its SHA256 checked). 'repo' stays a string in both
+# cases (caps / the UI show it); 'weights' is the file name the libraries may already hold.
+# crispz-klein's two Consistence-Edit entries are kept below as a merge reference: they are
+# FLUX.2-klein files (double_blocks keys) and cz_pipeline._lora_unsupported refuses them
+# here by family.
+OUTPAINT_PRESET = "Outpaint"
+OUTPAINT_PROMPT = ("Outpaint the image: replace the solid gray areas with a seamless "
+                   "continuation of the scene, keeping the existing picture unchanged.")
+EDIT_LORA_SPECS = {
+    OUTPAINT_PRESET: {
+        # "FLUX 3 Image Klein Outpaint LoRA" v1.0, CivitAI models/3003865 version 3407881
+        # (2026-10-28, the first edit-task LoRA published for FLUX.3 Image Klein, 13 days
+        # after the model). bf16, 153 MB. The author: "Step 1,000 of a 2,000-step run. Use
+        # it on the distilled model at strength 1.5." The input is the image enlarged with
+        # SOLID GRAY where the scene has to continue; the prompt is the trigger sentence.
+        # cz_pipeline.outpaint_lora builds that canvas from the Inpaint / Outpaint tab
+        # (mode "Expand sides (outpaint LoRA)"); the Edit tab can also take a hand-made one.
+        "repo": "civitai.com/models/3003865",
+        "weights": "flux-3-image-klein-outpaint.safetensors",
+        "civitai": {"versionId": 3407881,
+                    "fileName": "flux-3-image-klein-outpaint.safetensors",
+                    "sizeKB": 156930.765625,
+                    "sha256": "25385da7f6bfac0c18513e52729dc29f96cda543f0d086df9e5dda3842dede83",
+                    "downloadUrl": "https://civitai.com/api/download/models/3407881?fileId=3299567"},
+        "adapter_name": "flux3-outpaint",
+        "prompt": OUTPAINT_PROMPT,
+        "inputs": 1, "base": "flux3-distilled",
+        "weight": 1.5,          # the author's figure; 1.0 leaves gray patches (his examples)
+        "local_names": ["flux-3-image-klein-outpaint.safetensors",
+                        "flux3_outpaint.safetensors"]},
+}
 
 # --- crispz-klein's catalogue (FLUX.2), a MERGE REFERENCE: does not load on FLUX.3.
 # EDIT_LORA_SPECS = {
@@ -446,12 +473,33 @@ def resolve_speed(name, omni_model, download=True):
 
 
 def _download(s, dst, progress=None):
-    """hf_hub_download -> an atomic copy to dst (a stable ASCII name)."""
+    """hf_hub_download -> an atomic copy to dst (a stable ASCII name). A 'civitai' spec
+    goes through cz_civitai.download_model_file instead (streamed, SHA256 checked against
+    the one the spec carries, the API key of the config added when there is one), then is
+    renamed to dst so that local_path() finds it next time."""
     import shutil
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    if s.get("civitai"):
+        import cz_civitai
+        cand = dict(s["civitai"])
+        _log(f"edit LoRA: downloading {s['repo']} ({cand.get('fileName')}) -> {dst}")
+        if progress:
+            progress(0.0, f"Downloading {s['repo']} ...")
+        res = cz_civitai.download_model_file(
+            cand, os.path.dirname(dst),
+            progress=(lambda _k, f, t: progress(f, t)) if progress else None)
+        if not res.get("success"):
+            raise RuntimeError(f"download failed for {s['repo']}: {res.get('message')}")
+        got = res.get("path")
+        if got and os.path.abspath(got) != os.path.abspath(dst):
+            os.replace(got, dst)
+        _dbg(f"edit LoRA stored: {dst} ({os.path.getsize(dst) / 1024**2:.0f} MB)")
+        if progress:
+            progress(1.0, "Downloaded.")
+        return dst
     from huggingface_hub import hf_hub_download
     from cz_core import _apply_hf_token
     _apply_hf_token(CONFIG.get("hf_token"))
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
     _log(f"edit LoRA: downloading {s['repo']}/{s['weights']} -> {dst}")
     if progress:
         progress(0.0, f"Downloading {s['repo']} ...")

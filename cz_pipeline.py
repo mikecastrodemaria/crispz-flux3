@@ -4957,6 +4957,95 @@ def outpaint_directions(image, mask, directions, prompt, steps, seed, strength=1
     return out
 
 
+# The gray the Outpaint LoRA was trained to replace (CivitAI 3003865: "solid gray areas").
+OUTPAINT_GRAY = (128, 128, 128)
+
+
+def outpaint_canvas(image, directions, expand=0.3, mask=None, gray=OUTPAINT_GRAY):
+    """The input of the Outpaint LoRA: the image enlarged in `directions` (each by
+    `expand`, a fraction of the original dimension) with the added bands in SOLID GRAY,
+    plus the painted `mask` (white = to redo) grayed out as well. The canvas is rounded to
+    multiples of 16 by GROWING the gray bands (never by cropping the picture): the edit
+    path keeps its input's size, and a size the pipe would round would shift the original
+    pixels under the composite. Returns (canvas, mask of the gray areas, box of the
+    original = (left, top) inside the canvas)."""
+    img = image.convert("RGB")
+    W, H = img.size
+    dirs = set(d.lower() for d in (directions or []))
+    top = int(H * expand) if "top" in dirs else 0
+    bottom = int(H * expand) if "bottom" in dirs else 0
+    left = int(W * expand) if "left" in dirs else 0
+    right = int(W * expand) if "right" in dirs else 0
+    # Round up to 16 on the side(s) being extended; an untouched axis that is not a
+    # multiple of 16 grows on the right / bottom (the pipe would round it anyway).
+    cw, ch = W + left + right, H + top + bottom
+    rw, rh = -(-cw // 16) * 16, -(-ch // 16) * 16        # ceil to 16
+    if rw > cw:
+        (right, left) = (right + rw - cw, left) if (right or not left) else (right, left + rw - cw)
+    if rh > ch:
+        (bottom, top) = (bottom + rh - ch, top) if (bottom or not top) else (bottom, top + rh - ch)
+    cw, ch = W + left + right, H + top + bottom
+    canvas = Image.new("RGB", (cw, ch), gray)
+    canvas.paste(img, (left, top))
+    m = Image.new("L", (cw, ch), 255)
+    m.paste(Image.new("L", (W, H), 0), (left, top))
+    if mask is not None:
+        painted = mask.convert("L").point(lambda v: 255 if v > 127 else 0)
+        canvas.paste(Image.new("RGB", (W, H), gray), (left, top), painted)
+        m.paste(painted, (left, top), painted)
+    return canvas, m, (left, top)
+
+
+def outpaint_lora(image, directions, prompt, steps, seed, mask=None, expand=0.3,
+                  weight=None, keep_original=True):
+    """Outpaint through the FLUX.3 Outpaint LoRA (cz_edit_loras.OUTPAINT_PRESET, CivitAI
+    3003865): the image is enlarged with solid gray bands (outpaint_canvas), the LoRA is
+    applied at `weight` (the preset's 1.5 by default) and the EDIT path is asked to
+    replace the gray with the scene, the trigger sentence first and the user's prompt
+    after it. The ORIGINAL pixels are pasted back over the result (feathered edge) so
+    the picture itself cannot drift, whatever the LoRA does under the canvas.
+
+    It differs from outpaint_directions (edge replication + inpaint blending, no LoRA):
+    this one sees the whole picture as a reference and continues it, the other paints in
+    a masked band. The LoRA was trained on the distilled checkpoint; on the base one it
+    runs but is not what the author measured (said in the log).
+
+    The edit LoRA set is swapped for the single Outpaint entry for the duration of the
+    call and restored afterwards: a user's other edit preset must not stack on top of it
+    (the next generate_omni re-syncs the adapters from EDIT_LORAS anyway)."""
+    global EDIT_LORAS, EDIT_LORAS_ENABLED
+    import cz_edit_loras
+    name = cz_edit_loras.OUTPAINT_PRESET
+    s = cz_edit_loras.spec(name) or {}
+    w = float(s.get("weight", 1.5) if weight is None else weight)
+    path = cz_edit_loras.resolve(name)
+    canvas, gray_mask, (left, top) = outpaint_canvas(image, directions, expand=expand, mask=mask)
+    trigger = s.get("prompt") or cz_edit_loras.OUTPAINT_PROMPT
+    full = trigger + ((" " + prompt.strip()) if (prompt or "").strip() else "")
+    if is_base_variant():
+        _log("outpaint LoRA: the base (undistilled) checkpoint is loaded; the LoRA was "
+             "trained for the distilled one, the result may differ from the author's")
+    _log(f"outpaint LoRA {sorted(set(d.lower() for d in directions or []))}: "
+         f"{image.size[0]}x{image.size[1]} -> {canvas.size[0]}x{canvas.size[1]}, "
+         f"{os.path.basename(path)}@{w:g}, {int(steps)} steps ...")
+    saved = (list(EDIT_LORAS), EDIT_LORAS_ENABLED)
+    EDIT_LORAS, EDIT_LORAS_ENABLED = [(path, w)], True
+    try:
+        out = generate_omni([canvas], full, "", canvas.width, canvas.height, steps, seed,
+                            honor_size=True)
+    finally:
+        EDIT_LORAS, EDIT_LORAS_ENABLED = saved
+    if out.size != canvas.size:
+        _log(f"outpaint LoRA: the edit came back {out.size[0]}x{out.size[1]} for a "
+             f"{canvas.size[0]}x{canvas.size[1]} canvas, resized to fit")
+    if keep_original:
+        out = _composite_back(out, canvas, gray_mask, canvas.size,
+                              feather=max(2, int(min(canvas.size) * 0.004)))
+    elif out.size != canvas.size:
+        out = out.resize(canvas.size, Image.LANCZOS)
+    return out
+
+
 def _make_generator(seed):
     return torch.Generator(DEVICE).manual_seed(int(seed)) if int(seed) >= 0 else None
 

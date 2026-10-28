@@ -6,6 +6,14 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
 
 ## Unreleased
 
+- **Outpaint LoRA**: the CivitAI "FLUX 3 Image Klein Outpaint LoRA" (models/3003865,
+  2026-10-28, the first edit-task LoRA for FLUX.3) ships as the `Outpaint` edit preset
+  (downloaded from CivitAI on first use, SHA256 checked, weight 1.5 as the author
+  advises) and as a 4th mode of Inpaint / Outpaint, *Expand sides (outpaint LoRA)*:
+  the picture goes on a canvas whose new bands are solid gray and the edit path replaces
+  the gray with the scene (`cz_pipeline.outpaint_lora`); the original pixels are pasted
+  back. CLI: `--expand-lora` / `--expand-lora-weight`. The edit preset machinery takes a
+  `civitai` source next to the Hugging Face one.
 - `tools/bench_models.py` speaks FLUX.3: the variant column reads the tensor names
   (distilled / base) instead of a 4B / 9B hidden width, the official repos take their
   own profile (16 / 1.0, 50 / 3.5) instead of klein's 4 steps, the `-base` repo entry is

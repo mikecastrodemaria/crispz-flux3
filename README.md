@@ -80,8 +80,10 @@ On top of crispz's upscaler it adds:
   CSVs (downloaded once into `tags/`; drop any `.csv` there to add a source) merged with
   your local `__wildcards__`. Dropdown under the caret, up/down + Tab/Enter, Escape;
   popularity-ranked, indexed (sub-ms per keystroke).
-- **Inpaint / Outpaint** (one tab, 3 modes): **Brush** repaints a painted mask,
+- **Inpaint / Outpaint** (one tab, 4 modes): **Brush** repaints a painted mask,
   **Expand sides** outpaints Left/Right/Top/Bottom (+ **Center**) about 30% per side,
+  **Expand sides (outpaint LoRA)** does the same through the FLUX.3 Outpaint LoRA (the
+  model sees the whole picture on a gray canvas and continues it),
   **Reframe** to a new aspect ratio (**Contain** = keep the whole image and fill the
   borders, **Cover** = crop to fill). All bounded to the model's 1 MP sweet spot (no
   pixel blow-up), with blurred-edge fill + feathered seams for clean blends, an optional
@@ -374,7 +376,7 @@ compatibility with the family and is a no-op.
 |---|---|
 | **ControlNet** | no FLUX.3 ControlNet published yet |
 | **IP-Adapter** (what Fooocus uses for image prompts on SDXL) | none, and unnecessary: multi-reference is native |
-| **Edit-task LoRAs** | none published for FLUX.3 yet (the model is weeks old). The catalogue is empty on purpose; a preset you declare in `config.txt` (`edit_loras`) is picked up at once, see below |
+| **Edit-task LoRAs** | one so far: the CivitAI **Outpaint** LoRA ships as a preset (and as an Inpaint / Outpaint mode); a preset you declare in `config.txt` (`edit_loras`) is picked up at once, see below |
 | **Lightning / speed LoRAs** | none; the distilled checkpoint already runs 16 steps, the Edit speed control is hidden until one ships |
 | **Bounding boxes** | the model supports them (a 0-1000 grid per reference); the UI does not expose them yet (0.2) |
 
@@ -491,7 +493,17 @@ Performance) and **Strength** are shared across modes:
 - **Brush (inpaint)**: paint a mask over the area to change, describe the result in the
   prompt, run. Brush size is set from the editor toolbar (click the brush icon).
 - **Expand sides (outpaint)**: check **Left / Right / Top / Bottom** (or **Center** for
-  all four) to grow the canvas about 30% per side; the model fills the new borders.
+  all four) to grow the canvas about 30% per side; the model fills the new borders
+  (edge replication + masked denoise, the inpaint path).
+- **Expand sides (outpaint LoRA)**: the same sides, through the
+  [FLUX 3 Image Klein Outpaint LoRA](https://civitai.com/models/3003865) (153 MB,
+  downloaded on first use into your LoRA folder). The picture is placed on a canvas whose
+  new bands are **solid gray**, and the edit path is asked, with the LoRA's trigger
+  sentence, to replace the gray with the scene: the model sees the whole image as a
+  reference and continues it, which holds composition and lighting better than a masked
+  fill. The author advises a weight of **1.5** on the distilled checkpoint (the slider
+  under the sides); your prompt is appended to the trigger. Painted areas are grayed and
+  redone too, and the original pixels are pasted back over the result.
 - **Reframe (ratio)**: pick a target aspect ratio + **Contain** (keep the whole image
   and fill the borders) or **Cover** (crop to fill).
 
@@ -804,12 +816,15 @@ into every LoRA list. On a duplicate file name the main folder wins.
 
 The edit (Edit (references) tab, protocol op `edit`) runs on the **same** pipeline as
 txt2img: the LoRA slots above apply to edits too, and the **Edit LoRA presets** dropdown
-under the reference images adds its preset on top. **The catalogue ships empty**: no
-edit-task LoRA has been published for FLUX.3 yet, and the consistency presets of the
-previous engine are FLUX.2 files. The machinery is intact and waits for the first one:
-declare it in `config.txt` and it appears in the dropdown, downloads from Hugging Face on
-first selection into `<loras_dir>/_hf-edit/<adapter>.safetensors` (or reuses a copy found
-in one of your LoRA folders), and picking it sets the weight slider to its advised value:
+under the reference images adds its preset on top. The catalogue ships **one** preset,
+**Outpaint** (the CivitAI FLUX 3 Image Klein Outpaint LoRA, 2026-10-28, weight 1.5):
+pick it, put a hand-made gray canvas in Ref 1 and use its example prompt, or let the
+Inpaint / Outpaint tab build the canvas for you (mode *Expand sides (outpaint LoRA)*).
+The consistency presets of the previous engine are FLUX.2 files and are not listed.
+Declare another one in `config.txt` and it appears in the dropdown, downloads from
+Hugging Face on first selection into `<loras_dir>/_hf-edit/<adapter>.safetensors` (or
+reuses a copy found in one of your LoRA folders), and picking it sets the weight slider
+to its advised value:
 
 ```json
 "edit_loras": {
@@ -1403,7 +1418,7 @@ Ops: `gen`, `upscale` (`input` + `factor`/`denoise`; **`factor` 1 = pure img2img
 variation, no ESRGAN stage**), `edit` (up to 10 reference images + an instruction that
 cites them as `<ref_image_N>`), `inpaint` (image + mask + a prompt describing the whole
 scene: only the white area is redrawn). On `edit`, `spec.loras` accepts an edit preset
-name (see `caps.edit_loras`, empty until one is declared) or a file, and lands on the
+name (see `caps.edit_loras`: `Outpaint` ships) or a file, and lands on the
 edit pipe; `guidance` is applied there (the distilled checkpoint wants 1.0), and an
 explicit `width`/`height` is passed to the pipe (Upscaler preset = 2x output). `fast`
 (see `caps.edit_fast`, `off` only on FLUX.3) sets the edit speed mode; an explicit

@@ -111,6 +111,50 @@ def test_outpaint_fills_a_canvas_at_the_ratio(engine, monkeypatch):
     assert out.size[0] > 64 and out.size[1] == 64
 
 
+def test_outpaint_canvas_grays_the_bands_and_rounds_up_to_16():
+    src = Image.new("RGB", (100, 70), (90, 140, 200))
+    canvas, gray, (left, top) = P.outpaint_canvas(src, ["right", "bottom"], expand=0.3)
+    assert canvas.size[0] % 16 == 0 and canvas.size[1] % 16 == 0
+    assert canvas.size[0] >= 130 and canvas.size[1] >= 91          # never cropped
+    assert (left, top) == (0, 0)
+    assert canvas.getpixel((5, 5)) == (90, 140, 200)               # the picture, intact
+    assert canvas.getpixel((canvas.size[0] - 1, 5)) == P.OUTPAINT_GRAY
+    assert gray.getpixel((5, 5)) == 0 and gray.getpixel((canvas.size[0] - 1, 5)) == 255
+    # left / top bands shift the picture; a painted mask is grayed out too
+    mask = Image.new("L", (100, 70), 0)
+    mask.paste(255, (10, 10, 30, 30))
+    canvas, gray, (left, top) = P.outpaint_canvas(src, ["left", "top"], expand=0.5, mask=mask)
+    assert left >= 50 and top >= 35
+    assert canvas.getpixel((left + 20, top + 20)) == P.OUTPAINT_GRAY
+    assert gray.getpixel((left + 20, top + 20)) == 255
+    assert canvas.getpixel((left + 60, top + 60)) == (90, 140, 200)
+
+
+def test_outpaint_lora_edits_a_gray_canvas_and_keeps_the_picture(engine, monkeypatch, tmp_path):
+    """The LoRA path: the edit set is swapped for the Outpaint entry at the asked weight
+    for the call only, the edit runs at the canvas size (honor_size), and the original
+    pixels come back untouched over the result."""
+    import cz_edit_loras
+    fake = tmp_path / "flux3-outpaint.safetensors"
+    fake.write_bytes(b"")
+    monkeypatch.setattr(cz_edit_loras, "resolve", lambda name, **kw: str(fake))
+    seen = {}
+
+    def fake_apply(pipe):
+        seen["edit_loras"] = list(P.EDIT_LORAS)
+        seen["enabled"] = P.EDIT_LORAS_ENABLED
+    monkeypatch.setattr(P, "_apply_edit_loras", fake_apply)
+    monkeypatch.setattr(P, "EDIT_LORAS", [("other.safetensors", 0.6)], raising=False)
+    monkeypatch.setattr(P, "EDIT_LORAS_ENABLED", False, raising=False)
+    src = Image.new("RGB", (64, 48), (90, 140, 200))
+    out = P.outpaint_lora(src, ["right"], "a beach", 1, 7, expand=0.5)
+    assert seen["edit_loras"] == [(str(fake), 1.5)] and seen["enabled"] is True
+    assert P.EDIT_LORAS == [("other.safetensors", 0.6)] and P.EDIT_LORAS_ENABLED is False
+    assert out.size == (96, 48) and out.getpixel((5, 5)) == (90, 140, 200)
+    out = P.outpaint_lora(src, [], "", 1, 7, weight=1.2, mask=Image.new("L", (64, 48), 255))
+    assert seen["edit_loras"][0][1] == 1.2 and out.size == (64, 48)
+
+
 def test_the_sampler_choice_is_ignored_once_and_said(engine, monkeypatch):
     lines = _logs(monkeypatch)
     sched = engine.scheduler

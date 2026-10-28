@@ -422,6 +422,13 @@ def cli_main(argv=None):
                              "--gen-steps sets the steps.")
     parser.add_argument("--expand-ratio", type=float, default=0.3, metavar="0.3",
                         help="Growth per side for --expand (fraction of the source size)")
+    parser.add_argument("--expand-lora", action="store_true",
+                        help="--expand through the FLUX.3 Outpaint LoRA (CivitAI 3003865, "
+                             "downloaded on first use) on a gray canvas, the UI's 'Expand "
+                             "sides (outpaint LoRA)': the model sees the whole picture and "
+                             "continues it. --prompt is appended to the trigger sentence.")
+    parser.add_argument("--expand-lora-weight", type=float, default=1.5, metavar="1.5",
+                        help="LoRA strength for --expand-lora (the author advises 1.5)")
     parser.add_argument("--inpaint-mask", metavar="PATH",
                         help="Inpaint: repaint the WHITE area of this mask (L/RGB image, same "
                              "size as -i) guided by --prompt, then exit. --gen-steps sets the "
@@ -652,9 +659,14 @@ def cli_main(argv=None):
             sides = ["left", "right", "top", "bottom"]
         if not sides or any(s not in ("left", "right", "top", "bottom") for s in sides):
             parser.error("--expand expects a comma list among left,right,top,bottom (or 'all')")
-        res = _maybe_faceswap(cz_pipeline.outpaint_directions(
-            Image.open(args.input), None, sides, args.prompt, args.gen_steps, args.seed,
-            expand=args.expand_ratio))
+        if args.expand_lora:
+            res = _maybe_faceswap(cz_pipeline.outpaint_lora(
+                Image.open(args.input), sides, args.prompt, args.gen_steps, args.seed,
+                expand=args.expand_ratio, weight=args.expand_lora_weight))
+        else:
+            res = _maybe_faceswap(cz_pipeline.outpaint_directions(
+                Image.open(args.input), None, sides, args.prompt, args.gen_steps, args.seed,
+                expand=args.expand_ratio))
         sm = args.save_mode if args.save_mode != "display" else "local"
         base = os.path.splitext(os.path.basename(args.input))[0]
         dst = args.output if (args.output and not os.path.isdir(args.output)) else \

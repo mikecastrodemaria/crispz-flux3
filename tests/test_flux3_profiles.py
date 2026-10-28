@@ -81,11 +81,12 @@ def test_config_sample_orders_base_before_distilled_and_matches_the_code():
     assert prefs["flux3_model"] == DISTILLED and "klein_model" not in prefs
 
 
-def test_the_ui_presets_mirror_the_sample_and_the_edit_catalogue_is_empty():
+def test_the_ui_presets_mirror_the_sample_and_the_edit_catalogue_is_flux3_only():
     import cz_edit_loras
-    assert cz_edit_loras.EDIT_LORA_SPECS == {}
-    assert cz_edit_loras.names() == [] or all(
-        isinstance(n, str) for n in cz_edit_loras.names())   # config overrides may add some
+    # One shipped preset (the CivitAI Outpaint LoRA, 2026-10-28), no FLUX.2 leftover
+    assert list(cz_edit_loras.EDIT_LORA_SPECS) == [cz_edit_loras.OUTPAINT_PRESET]
+    assert all(isinstance(n, str) for n in cz_edit_loras.names())   # config may add some
+    assert not any("klein" in str(s.get("base", "")) for s in cz_edit_loras.SPECS.values())
     with open(os.path.join(ROOT, "config-sample.txt"), encoding="utf-8") as f:
         cfg = json.load(f)
     # cz_ui's built-in PERFORMANCE is the fallback when config has none: the same table
