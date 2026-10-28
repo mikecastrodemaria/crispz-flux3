@@ -102,7 +102,7 @@ FLUX.2-klein-4B : l'ancien tri 4B/9B laisserait passer un fichier FLUX.2.
 Piège diffusers : `ModularPipeline.blocks` renvoie une **copie** ; les vrais blocs sont
 dans `mp._blocks` (c'est là qu'on rattache `hook.owner`).
 
-## 5. État au 28/10/2026 (branche `wip/flux3-engine`, lots A à E livrés, e2e GPU en attente)
+## 5. État au 28/10/2026 (branche `wip/flux3-engine`, lots A à E livrés, e2e GPU passé)
 
 Fait au lot E : les 47 tests FLUX.2 sont réécrits avec la même intention sur FLUX.3 (garde
 par famille, libellés FLUX.3 / FLUX.2, profils 16 / 50, catalogue d'edit LoRAs vide mais
@@ -113,11 +113,13 @@ fichier FLUX.2 au lieu de proposer un repo. `tests/test_flux3_e2e.py` (GPU, 6 é
 chargement, gen, edit 1 ref, edit 2 refs, inpaint, refine, plus le Stop) se saute sans
 CUDA ou sans accès au repo. Suite CPU : **533 passent, 0 échec, 1 skip (le e2e)**.
 
-**Le e2e GPU n'a pas encore tourné** : la session HF de cette machine (compte KimHose) lit
-les métadonnées des repos FLUX.3 mais le téléchargement répond GatedRepoError. Mike doit
-accepter la licence sur https://huggingface.co/black-forest-labs/flux-3-image-klein (et
--base) avec ce compte ; ensuite `.venv-lock/Scripts/python tests/test_flux3_e2e.py`
-(environ 20 Go, bf16 seul : les variantes fp8r / nvfp4 sont des téléchargements à part).
+**Le e2e GPU est passé sur la 5090** (`tests/test_flux3_e2e.py`, bf16, offload none) :
+chargement 50,6 s à froid / 21,8 s à chaud, txt2img 1024x1024 16 steps 6,6 à 7,1 s, édition
+1 ref 13,5 s, 2 refs 23,4 s, inpaint 3,6 à 5,7 s, refine 0,35 2,3 s, 18,8 Go résidents, pic
+23,7 Go. Détail et leçons dans FORK.md (édition timide sans upsampler : identique au pixel
+près au chemin diffusers brut, donc le modèle ; l'inpaint veut le prompt de toute la scène ;
+la force img2img est une fraction des steps, règle diffusers, corrigée après mesure).
+Les images sont dans `tests/e2e_*.png` (local), à reprendre pour le README au lot F.
 
 Fait au lot D : `requirements.txt` sur `diffusers==0.42.1` (PyPI), `transformers>=5,<6`,
 `huggingface-hub>=1.32` ; `requirements-lock.txt` régénéré depuis un venv vierge Python
@@ -294,7 +296,7 @@ Acceptation : `tools/smoke_test.py` vert (22 checks, `build_ui()` compris) ;
 
 Acceptation : installation propre dans un venv vierge ; `python -c "import app"` OK.
 
-### Lot E : tests (FAIT le 28/10/2026 sur CPU ; le e2e GPU attend la licence)
+### Lot E : tests (FAIT le 28/10/2026, CPU et e2e GPU sur la 5090)
 
 1. Les 24 tests FLUX.2 listés au §5 : pour chacun, soit le réécrire pour FLUX.3 (même
    intention, ex. "un LoRA de l'autre famille est refusé en une phrase"), soit le

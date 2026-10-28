@@ -36,6 +36,7 @@ it can be tested in isolation with tiny random components (tests/test_flux3_adap
 """
 
 import json
+import logging
 import os
 import types
 
@@ -169,6 +170,26 @@ class _Interrupted(Exception):
     has no break of its own. Carries nothing: the adapter keeps the last latents."""
 
 
+class _QuietInterrupt(logging.Filter):
+    """diffusers logs every exception that crosses a block as an ERROR with its full
+    traceback ("Error in block: ..."), once per nesting level: a Stop printed four
+    tracebacks for a wanted interrupt (seen on the 2026-10-28 e2e). While an interrupt is
+    in flight those records are dropped; any other error still shows."""
+    active = False
+
+    def filter(self, record):
+        if not _QuietInterrupt.active:
+            return True
+        msg = str(record.getMessage())          # starts with a newline in diffusers 0.42
+        return "Error in block" not in msg and "Error details" not in msg
+
+
+def _install_quiet_interrupt():
+    lg = logging.getLogger("diffusers.modular_pipelines.modular_pipeline")
+    if not any(isinstance(f, _QuietInterrupt) for f in lg.filters):
+        lg.addFilter(_QuietInterrupt())
+
+
 def _make_hook_block():
     """A loop sub-block that hands every step to the adapter. Built lazily so importing
     this module never requires the modular API (smoke tests, the CLI's --help)."""
@@ -277,15 +298,20 @@ def shifted_sigmas(n, shift):
 def img2img_schedule(n, strength, shift):
     """(sigmas to hand the pipeline, sigma of the first kept step, steps run).
 
-    SDEdit on a flow-matching model: x_t = (1 - sigma) * x0 + sigma * noise. With n
-    steps and a strength s in (0, 1], the steps whose shifted sigma is above s are
-    skipped; at least one step always runs (a 0.05 denoise must still touch the image).
-    The UNSHIFTED tail is returned because the scheduler applies the shift itself."""
+    SDEdit on a flow-matching model: x_t = (1 - sigma) * x0 + sigma * noise. The
+    strength is a FRACTION OF THE STEPS, diffusers' own rule (FluxImg2ImgPipeline
+    .get_timesteps: t_start = n - n * strength), so a 0.35 denoise runs ~35 % of the
+    steps from the shifted sigma of that index, as it did on crispz-klein's
+    Flux2KleinInpaintPipeline. Measured on 2026-10-28 (RTX 5090, 16 steps, shift 6.93):
+    reading the strength as a SIGMA instead ran a single step at 0.35 (the shift keeps
+    every sigma but the last above 0.5) and a 0.35 refine changed nothing visible.
+    At least one step always runs (a 0.05 denoise must still touch the image). The
+    UNSHIFTED tail is returned because the scheduler applies the shift itself."""
     n = max(1, int(n))
     s = float(min(max(strength, 0.0), 1.0))
     raw = np.linspace(1.0, 1.0 / n, n)
     sh = shifted_sigmas(n, shift)
-    start = int(np.searchsorted(-sh, -s, side="left"))      # first index with sh <= s
+    start = int(max(n - n * s, 0))
     start = min(start, n - 1)
     return list(raw[start:]), float(sh[start]), n - start
 
@@ -317,6 +343,7 @@ class Flux3Pipe:
         object.__setattr__(self, "guidance_scale", DEFAULTS[variant]["guidance"])
         for h in _find_hooks(getattr(mp, "_blocks", None) or mp.blocks):
             h.owner = self
+        _install_quiet_interrupt()
 
     # -- attribute plumbing --
     def __getattr__(self, name):
@@ -531,6 +558,7 @@ class Flux3Pipe:
             if isinstance(ret, dict) and ret.get("latents") is not None:
                 block_state.latents = ret["latents"]
         if self._interrupt:
+            _QuietInterrupt.active = True
             raise _Interrupted()
 
     # -- the call --
@@ -621,6 +649,7 @@ class Flux3Pipe:
             else:
                 images = self._decode_tokens(lat, out_w, out_h, output_type)
         finally:
+            _QuietInterrupt.active = False
             self._step_ctx = None
             self.maybe_free_model_hooks()
         if not isinstance(images, list):

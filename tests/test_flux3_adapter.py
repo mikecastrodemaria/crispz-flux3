@@ -57,16 +57,20 @@ def test_repo_names_decide_the_variant_and_the_family():
     assert cz_flux3.DEFAULTS["base"] == {"steps": 50, "guidance": 3.5}
 
 
-def test_img2img_schedule_keeps_the_tail_and_always_one_step():
+def test_img2img_schedule_is_a_fraction_of_the_steps_and_always_one_step():
+    """diffusers' rule (FluxImg2Img.get_timesteps): strength 0.5 runs half the steps from
+    the shifted sigma of that index. Reading the strength as a sigma ran ONE step at 0.35
+    (every shifted sigma but the last is above 0.5), measured on the 5090 e2e."""
     n, shift = 16, 6.93
     full, s0, run = cz_flux3.img2img_schedule(n, 1.0, shift)
     assert run == n and len(full) == n and s0 == pytest.approx(1.0)
     tail, s0, run = cz_flux3.img2img_schedule(n, 0.5, shift)
-    assert 0 < run < n and len(tail) == run
-    assert s0 <= 0.5                      # the first kept step starts at or below the strength
+    assert run == 8 and len(tail) == 8
+    assert s0 == pytest.approx(cz_flux3.shifted_sigmas(n, shift)[8])
     # the tail is the UNSHIFTED linspace: the scheduler applies the shift itself
-    assert tail[0] == pytest.approx(1.0 - (n - run) / n * (1 - 1 / n) / (1 - 1 / n) * 1.0, abs=1.0)
-    assert tail[-1] == pytest.approx(1.0 / n)
+    assert tail[0] == pytest.approx(0.5) and tail[-1] == pytest.approx(1.0 / n)
+    _, _, run = cz_flux3.img2img_schedule(n, 0.35, shift)
+    assert run == 6                       # int(16 - 5.6) = 10 skipped
     _, _, run = cz_flux3.img2img_schedule(4, 0.05, shift)
     assert run == 1                       # a 0.05 denoise still touches the image
     assert cz_flux3.shifted_sigmas(2, shift)[0] == pytest.approx(1.0)
@@ -161,7 +165,9 @@ def test_inpaint_keeps_the_unmasked_tokens_and_a_white_mask_is_img2img():
     assert "mask" not in seen["ctx"]
 
 
-def test_an_interrupt_stops_the_loop_and_still_returns_an_image():
+def test_an_interrupt_stops_the_loop_and_still_returns_an_image(caplog):
+    import logging
+    caplog.set_level(logging.ERROR, logger="diffusers.modular_pipelines.modular_pipeline")
     pipe = tiny_pipe()
     steps = []
 
@@ -176,6 +182,10 @@ def test_an_interrupt_stops_the_loop_and_still_returns_an_image():
     assert steps == [0, 1]
     assert len(out) == 1 and out[0].size == (64, 48)   # decoded from the last latents
     assert pipe._step_ctx is None                       # the context never leaks
+    # diffusers logs every exception crossing a block as an ERROR with a traceback, once
+    # per nesting level: a wanted Stop must not print four of them
+    assert not [r for r in caplog.records if "Error in block" in r.getMessage()], caplog.text
+    assert cz_flux3._QuietInterrupt.active is False
     # the flag is reset by the next call
     out = pipe(prompt="x", width=64, height=48, num_inference_steps=2, generator=_gen()).images
     assert len(out) == 1

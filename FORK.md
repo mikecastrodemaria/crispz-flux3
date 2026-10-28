@@ -48,16 +48,38 @@ la config `hf_token`).
 L'encodeur Qwen3-VL-4B-Instruct est sous Apache 2.0. Le prompt upsampler
 `flux-3-image-klein-pup` (9B) a sa propre licence, à vérifier avant de l'activer.
 
-## Mémoire attendue (chiffres BFL / Hugging Face, à remesurer sur RTX 5090)
+## Mesures sur RTX 5090 (32 Go, driver 610.60, torch 2.11 cu128, 28/10/2026)
 
-| Variante | Pic après chargement | Pic après inférence |
-|---|---|---|
-| bf16 (H100) | 18,8 Go | 20,7 Go |
-| fp8r (H100) | 14,4 Go | 16,3 Go |
-| nvfp4 (RTX 6000, Blackwell) | 13,4 Go | 15,3 Go |
+`tests/test_flux3_e2e.py`, repo distillé en bf16, offload `auto` résolu en `none`
+(30,3 Go libres pour 22,9 Go estimés), 1024x1024, 16 steps, seed 7 :
 
-La model card annonce des chiffres plus hauts (31 Go en bf16 à 1024x1024 sur B200) :
-seule une mesure sur la 5090 tranchera.
+| Étape | Temps | VRAM résidente | Pic réservé |
+|---|---|---|---|
+| Chargement (transformer + Qwen3-VL + VAE) | 50,6 s à froid, 21,8 s à chaud | 18,8 Go | 18,8 Go |
+| txt2img (première image, noyaux CUDA compris) | 7,1 s | 18,8 Go | 23,7 Go |
+| Édition, 1 référence | 13,4 s | 18,8 Go | 21,7 Go |
+| Édition, 2 références | 23,5 s | 18,8 Go | 22,6 Go |
+| Inpaint (force 0,9, 14 steps) | 3,6 à 5,7 s | 18,8 Go | 21,7 Go |
+| Refine img2img (force 0,35, 6 steps) | 2,3 s | 18,8 Go | 21,7 Go |
+| txt2img, Stop au 3e step | 1,4 s | 18,8 Go | 21,7 Go |
+
+Les 18,8 Go résidents sont exactement le chiffre BFL pour la H100 en bf16 ; le pic à
+23,7 Go sur la première génération inclut l'échauffement des noyaux. Une 5090 fait donc
+tourner FLUX.3 bf16 entier, sans offload ; fp8r (14,4 Go annoncés) et nvfp4 (13,4 Go)
+restent à mesurer ici (sélecteur Precision).
+
+Ce que le e2e a appris, au-delà des chiffres :
+- **L'édition est timide sans le prompt upsampler.** "make it daytime, sunny, blue sky"
+  sur la scène de pluie éclaircit le ciel mais garde la pluie, et le chemin diffusers
+  brut (bloc text_encoder officiel, même seed) donne un résultat identique au pixel
+  près : c'est le modèle, pas l'adaptateur. Une description complète de l'image cible
+  aide un peu ; le pup 9B de BFL (v0.2, ou son `system_prompts.json` via Ollama) est fait
+  pour cette réécriture.
+- **L'inpaint veut le prompt de toute la scène**, pas celui du patch : "a large full moon"
+  seul ne donne rien, "the same panel ... a large bright full moon behind heavy clouds
+  in the top right corner" peint la lune, sans couture.
+- **La force du img2img est une fraction des steps** (règle diffusers, celle de klein) :
+  lue comme un sigma, avec le shift 6,93, un refine à 0,35 ne faisait qu'un seul step.
 
 Le prompt upsampler ajoute environ 28 Go : sur une 5090 (32 Go), il ne cohabite pas
 avec le générateur. Schéma prévu : upsampler, puis déchargement, puis génération
@@ -67,18 +89,18 @@ avec le générateur. Schéma prévu : upsampler, puis déchargement, puis gén�
 
 1. **Squelette** (fait) : fork, renommage `crispz-klein` vers `crispz-flux3`,
    version `0.1.0-dev`, ce document.
-2. **Cœur** : `cz_pipeline._ensure_base()` charge `ModularPipeline` + `load_components`.
-   Défauts 16 steps / sans CFG. Édition multi-référence avec `<ref_image_N>`.
-   Nouveau `requirements.txt` (diffusers récent, transformers compatible Qwen3-VL).
-3. **Nettoyage de ce qui n'a pas d'équivalent**, avec un message clair plutôt qu'une
-   erreur diffusers : inpaint / img2img (pas de `Flux3...InpaintPipeline`), LoRAs et
-   checkpoints single-file FLUX.2, gardes 3072/4096, remplacement d'encodeur, cache
-   d'embeddings (à réécrire sur le modèle "encode once, generate many"), sélecteur
-   4B/9B (remplacé par distillé / base, puis bf16 / fp8r / nvfp4).
-4. **Spécificités FLUX.3** : variantes quantifiées (`BFLQuantizationConfig`, nvfp4 sur
-   Blackwell avec flashinfer), bounding boxes dans l'UI, prompt upsampler optionnel.
-5. **Launcher** `crispz-flux3.pinokio`, puis validation de bout en bout sur RTX 5090
-   (mesures du tableau ci-dessus remplacées par les nôtres).
+2. **Cœur** (fait, lot A) : `cz_flux3.Flux3Pipe` enveloppe le pipeline modulaire de
+   diffusers 0.42.1 derrière la convention Flux2Klein ; img2img et inpaint ajoutés dans
+   l'adaptateur ; défauts 16 steps / sans CFG ; références `<ref_image_N>`.
+3. **Nettoyage** (fait, lots A à C) : gardes par famille de modèle au lieu de la largeur
+   3072/4096 (FLUX.3 est aussi large que klein-4B), sélecteur distillé / base puis
+   bf16 / fp8r / nvfp4, encodeur de remplacement et sampler non-Euler grisés avec leur
+   raison, dequant ComfyUI non porté.
+4. **Dépendances et tests** (fait, lots D et E) : diffusers PyPI, transformers 5, Python
+   3.11+, suite verte sur CPU, e2e GPU ci-dessus.
+5. **Reste** : documentation finale et fusion dans `main` (lot F), launcher
+   `crispz-flux3.pinokio`. Puis v0.2 : prompt upsampler, bounding boxes, troncature de
+   l'encodeur Qwen3-VL, mesures fp8r / nvfp4, qualité du CFG sur la variante base.
 
 ## Sources
 
