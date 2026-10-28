@@ -4035,6 +4035,12 @@ def _apply_lokrs_to(transformer):
         _APPLIED_LOKRS.append((p, w))
 
 
+# The last exception of _sync_adapters, in one line: the UI's "see log" sent the user to
+# a console he may not have open (the Outpaint LoRA, 2026-10-28), the cause goes into
+# the error he reads instead.
+_LAST_LORA_ERROR = ""
+
+
 def _sync_adapters(pipe, wanted, applied, force=False, tag="LoRA"):
     """Synchronises a pipe's PEFT adapters with the `wanted` set, WITHOUT reloading the
     model. `applied` = the set really applied on this pipe (a list of (path, weight)).
@@ -4111,7 +4117,9 @@ def _sync_adapters(pipe, wanted, applied, force=False, tag="LoRA"):
             _log(f"{tag}s hot-swapped (no model reload)")
         return True, wanted
     except Exception as e:
-        _log(f"{tag} hot-swap failed ({e})")
+        global _LAST_LORA_ERROR
+        _LAST_LORA_ERROR = f"{type(e).__name__}: {e}"
+        _log(f"{tag} hot-swap failed ({_LAST_LORA_ERROR})")
         # diffusers removed the offload hooks before loading and did not get to put
         # them back: without this, the pipe stays on the CPU and EVERY later render fails,
         # including the ones that have nothing to do with this LoRA.
@@ -4192,8 +4200,8 @@ def _apply_edit_loras(pipe):
     ok, applied = _sync_adapters(pipe, wanted, _APPLIED_LORAS, tag="edit LoRA")
     if not ok:
         _APPLIED_EDIT_LORAS = []
-        raise RuntimeError("edit LoRA could not be applied on the edit pipe "
-                           "(see log); nothing was generated")
+        raise RuntimeError("edit LoRA could not be applied on the edit pipe: "
+                           f"{_LAST_LORA_ERROR or 'see log'}. Nothing was generated")
     _APPLIED_LORAS = applied
     _APPLIED_EDIT_LORAS = [pw for pw in applied if pw in edit]
 
