@@ -57,7 +57,7 @@ On top of crispz's upscaler it adds:
 
 - **Text -> Image**: generate from a prompt, with an optional **Upscale after generate**
   toggle (under the Generate button) that auto-chains each image, txt2img or Reference
-  (Omni), through the ESRGAN + refine pipeline, no manual step. CLI equivalent:
+  (Edit), through the ESRGAN + refine pipeline, no manual step. CLI equivalent:
   `--txt2img --upscale` (see README_CLI.md).
 - **Image -> Upscale** (the crispz pipeline): Real-ESRGAN + diffusion refine, 4K tiling,
   plus one-click **🎲 Vary (subtle / strong)** (pure img2img re-roll of an input image,
@@ -181,7 +181,7 @@ On top of crispz's upscaler it adds:
   sidecar: prompt, negative, seed, steps, guidance, size, model, base repo, LoRAs,
   **applied style names**. **Dated, unique filenames** (date + tag + seed + size).
 - **`config.txt`** for all defaults + the Ollama instruction strings.
-- **Reference (Omni)** native multi-image compose, **live, 4 slots in the tab, up to 10
+- **Edit (references)** native multi-image compose, **live, 4 slots in the tab, up to 10
   references through the CLI and the protocol**. FLUX.3 takes a list of reference images
   and the prompt names them (`<ref_image_0>` is Ref 1), so editing runs in the SAME
   pipeline as txt2img: no second model, no extra VRAM, no extra download.
@@ -224,7 +224,7 @@ name/port); this file is **gitignored**, never committed. Copy
 `CF_TUNNEL` empty for an ephemeral `*.trycloudflare.com` quick tunnel (no personal
 config). Needs `cloudflared` (`winget install --id Cloudflare.cloudflared`).
 
-> Roadmap status: **FaceSwap**, **Inpaint/Outpaint** and **Omni multi-reference** all
+> Roadmap status: **FaceSwap**, **Inpaint/Outpaint** and **multi-reference editing** all
 > work on FLUX.3. Planned for 0.2 (see FORK.md): BFL's **prompt upsampler** (edits follow
 > a short instruction timidly without it), **bounding boxes** in the Edit tab, the
 > fp8r / nvfp4 measurements. See the parent crispz repo for the upscale internals.
@@ -325,7 +325,7 @@ merges them into ONE prompt (e.g. person + outfit + setting). Needs Ollama with 
 vision model (llava, qwen-vl...) set in Advanced, Prompt AI. The merge instruction is
 `ollama_compose_prompt`, and `ollama_vision_blocklist` hides models that wrongly claim
 vision; both in `config.txt`. Vision Mix blends ideas/style, not exact pixels: that is
-what Reference (Omni) does.
+what Edit (references) does.
 
 **Multi-reference compose (person + outfit, etc.)** is **native here**, and this is the
 single biggest difference with the rest of the crispz family:
@@ -341,9 +341,9 @@ FLUX.3 takes the references as a list of images next to the prompt, so passing s
 is just another argument. Nothing to configure, nothing to download, no second model to
 keep resident.
 
-### Reference (Omni), always on
+### Edit (references), always on
 
-The **Reference (Omni)** tab is **enabled out of the box**. Drop 1 to 4 reference images,
+The **Edit (references)** tab is **enabled out of the box**. Drop 1 to 4 reference images,
 write the instruction, Generate. **Name the references in the prompt** the way FLUX.3
 was trained: `<ref_image_0>` is Ref 1, `<ref_image_1>` is Ref 2, and so on ("put the
 jacket of `<ref_image_1>` on the person in `<ref_image_0>`"). The output takes the size
@@ -365,7 +365,7 @@ let **Improve prompt** do it.
 
 The upstream `zimage_omni_model` / `zimage_omni_base` config keys are **gone**: there is
 no separate editor to point at. Changing the checkpoint changes the editor too, because
-they are the same model. The "Omni / Edit model" field in Models, Omni is kept for API
+they are the same model. The "Edit model" field in Models is kept for API
 compatibility with the family and is a no-op.
 
 ### What does not exist for FLUX.3 yet
@@ -458,9 +458,9 @@ A prompt can carry *dynamic prompts* variant groups: one option is picked per im
 - **In order**: the *Read wildcards in order* checkbox (config `wildcards_in_order`) applies to groups too. Image *i* of the batch takes option *i % n* (with CLI `--xyz`, *i* is the cell number).
 - **Before `__wildcards__`**: groups resolve first, so a placeholder written in an option that is not picked is never read. A wildcard line may itself contain groups.
 - **Negative prompt**: expanded too (its own draw); it acts on the base checkpoint and stays inert on the distilled one.
-- **Where**: UI **Generate** (txt2img, img2img, Reference (Omni)), the **Inpaint / Outpaint** tab, the **job queue** and the **X/Y/Z grid** (the *Prompt S/R* axis works on the raw text, groups included), the **CLI** (`--prompt`, `--negative`, `--xyz` per cell, `--serve`) and the **`czp` protocol**. A style `{prompt}` placeholder is never taken for a group (a group needs a `|` or a `N$$` prefix).
+- **Where**: UI **Generate** (txt2img, img2img, Edit (references)), the **Inpaint / Outpaint** tab, the **job queue** and the **X/Y/Z grid** (the *Prompt S/R* axis works on the raw text, groups included), the **CLI** (`--prompt`, `--negative`, `--xyz` per cell, `--serve`) and the **`czp` protocol**. A style `{prompt}` placeholder is never taken for a group (a group needs a `|` or a `N$$` prefix).
 - **`<lora:...>` tags** (read by the `czp` protocol) are taken from the expanded text: a tag inside an option only applies when that option is picked.
-- A seed `-1` is resolved to a concrete value **before** expanding (Omni, the Inpaint tab, the CLI and `czp upscale` included), so the picks are replayable and the seed is written to the metadata. The metadata stores the **expanded** prompt.
+- A seed `-1` is resolved to a concrete value **before** expanding (Edit, the Inpaint tab, the CLI and `czp upscale` included), so the picks are replayable and the seed is written to the metadata. The metadata stores the **expanded** prompt.
 - The console logs every expansion: `[crispz][Variants] a {red|blue} car -> a red car`.
 
 ## Tag autocomplete (prompt fields)
@@ -574,7 +574,7 @@ fidelity to the swapped pixels); 0.5 to 0.7 suits a 128 px swap. GFPGAN ignores 
 ### Where the swap runs, and what it replaces
 
 The swap is the **last** step of a render. The order is: generation (txt2img, img2img
-or Reference (Omni)), then **Upscale after generate**, then the face / hand
+or Edit (references)), then **Upscale after generate**, then the face / hand
 **detailer**, then the **face swap**. It runs on every image of a batch, and each
 swapped image is saved as its own file, tagged `faceswap`. Two consequences:
 
@@ -596,9 +596,9 @@ single copy serves every app. A missing auxiliary model is fetched once from the
 facefusion repository on Hugging Face; `inswapper_128.onnx` is never downloaded unless
 you set `faceswap_model_url`.
 
-## Try-on and casting: Reference (Omni) + face swap
+## Try-on and casting: Edit (references) + face swap
 
-Reference (Omni) can dress a person with a garment from a product shot, and even
+Edit (references) can dress a person with a garment from a product shot, and even
 change the head, in one edit. The face swap then puts the exact face back. The method
 below was worked out on the previous engine (the measurements are in FORK-klein.md) and
 carries over; the FLUX.3 figures are still to be taken.
@@ -619,7 +619,7 @@ it ("worn over a matching slip"), or the render may show the body through it.
 preset to lean on: the framing is held by the prompt ("keeps her exact pose and
 framing") and by describing the target image in full rather than issuing a verb.
 
-**The limit is the face in a full-body shot.** Omni renders at about one megapixel
+**The limit is the face in a full-body shot.** Edit renders at about one megapixel
 whatever the size of Ref 1: in a full-body shot the face is about 100 px high and gets
 redrawn. The **face swap** fixes it: with the portrait as the source, the face comes
 back to the person's features while keeping the expression of the render. Enlarging
@@ -628,7 +628,7 @@ gives the final definition.
 
 **Recipe for a casting** (person, garment in two views, another person's head):
 
-1. Tab **Reference (Omni)**: Ref 1 = full-body photo, Ref 2 = garment front, Ref 3 =
+1. Tab **Edit (references)**: Ref 1 = full-body photo, Ref 2 = garment front, Ref 3 =
    garment side, Ref 4 = portrait.
 2. Prompt as above, keeping "the joyful expression of `<ref_image_0>`" (or whatever the
    pose calls for) so the swapped face does not look pasted on a different mood.
@@ -802,7 +802,7 @@ into every LoRA list. On a duplicate file name the main folder wins.
 
 ### Edit LoRA presets
 
-The edit (Reference (Omni) tab, protocol op `edit`) runs on the **same** pipeline as
+The edit (Edit (references) tab, protocol op `edit`) runs on the **same** pipeline as
 txt2img: the LoRA slots above apply to edits too, and the **Edit LoRA presets** dropdown
 under the reference images adds its preset on top. **The catalogue ships empty**: no
 edit-task LoRA has been published for FLUX.3 yet, and the consistency presets of the

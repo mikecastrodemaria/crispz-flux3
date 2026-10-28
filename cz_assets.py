@@ -523,7 +523,7 @@ FOOOCUS_CSS = """
 .cz-lightbox img { max-width: 95vw; max-height: 95vh; object-fit: contain; }
 .cz-lightbox .cz-close { position: fixed; top: 14px; right: 26px; color: #fff;
   font-size: 44px; line-height: 1; cursor: pointer; font-weight: 300; }
-/* Reference (Omni) tab: airy blocks. Header = 2 columns (instructions + button |
+/* Edit (references) tab: airy blocks. Header = 2 columns (instructions + button |
    model status), refs 4 / 2 / 1 per row (the min_width of the Gradio columns = the
    breakpoints), controls 2/3 - 1/3. The Gradio columns stack by themselves when the
    width runs short: only the margins and the backgrounds are handled here. */

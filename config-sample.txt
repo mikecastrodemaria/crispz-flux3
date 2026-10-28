@@ -87,7 +87,7 @@
     },
     "_default_loras_help": "LoRAs applied at startup (in loras_dir). Names or [name, weight]. Empty = none. FLUX.3 LoRAs only: a FLUX.2 Klein LoRA is refused with its reason (different layers).",
     "default_loras": [],
-    "_edit_loras_help": "Edit LoRA presets. EMPTY on crispz-flux3 (2026-10-28): no edit-task LoRA has been published for FLUX.3 Image Klein yet, and crispz-klein's Consistence-Edit files are FLUX.2 (refused by family). The lazy-download machinery in cz_edit_loras.py is intact - declare one here ({\"repo\": ..., \"weights\": ..., \"prompt\": ..., \"inputs\": 1}) and it wakes up. Applied on the edit path (Reference (Omni) tab / protocol op edit).",
+    "_edit_loras_help": "Edit LoRA presets. EMPTY on crispz-flux3 (2026-10-28): no edit-task LoRA has been published for FLUX.3 Image Klein yet, and crispz-klein's Consistence-Edit files are FLUX.2 (refused by family). The lazy-download machinery in cz_edit_loras.py is intact - declare one here ({\"repo\": ..., \"weights\": ..., \"prompt\": ..., \"inputs\": 1}) and it wakes up. Applied on the edit path (Edit (references) tab / protocol op edit).",
     "edit_loras": {},
     "_edit_loras_dir_help": "Where edit presets are downloaded. Empty = <loras_dir>/_hf-edit (files are renamed <adapter_name>.safetensors -> they show up as normal LoRAs too).",
     "edit_loras_dir": "",

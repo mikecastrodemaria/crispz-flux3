@@ -26,9 +26,9 @@ def _st(name, tensors):
     return p
 
 
-# Cles minimales "FLUX.2" (marqueur single_transformer_blocks) au format ComfyUI.
-# Taken from the real FLUX.2-klein-4B transformer (see _QWEN_KEY_MARKERS).
-_W = "model.diffusion_model.single_transformer_blocks.0.attn.to_q.weight"
+# A minimal FLUX.3 key (the mode_blocks marker cz_flux3.family_from_keys reads) in the
+# ComfyUI layout: the dequant loader refuses a file of another family before reading it.
+_W = "model.diffusion_model.mode_blocks.0.img_attn.qkv.weight"
 # The SAME key in the diffusers layout: the loader has to strip the ComfyUI prefix, or
 # Flux2Transformer2DModel (mapped through an identity function in diffusers) recognises
 # no key at all and the model stays on 'meta' ("Cannot copy out of meta tensor").
@@ -182,7 +182,7 @@ def test_foreign_arch_rejected():
     try:
         cz_pipeline._load_dequant_state_dict(p)
     except RuntimeError as e:
-        raised = "FLUX.2" in str(e)
+        raised = "FLUX.3" in str(e)
     assert raised, "a quantised checkpoint of another architecture must be refused plainly"
 
 
@@ -314,7 +314,7 @@ def test_int8_convrot_declared_in_header_metadata():
     save_file({_W: q, _W + "_scale": scale.float()}, p,
               metadata={"_quantization_metadata": meta})
     sd = cz_pipeline._load_dequant_state_dict(p)
-    k = [x for x in sd if x.endswith("attn.to_q.weight") or "img_attn.proj" in x][0]
+    k = [x for x in sd if x.endswith(".weight") and "img_attn" in x][0]
     err = float((sd[k].float() - W).abs().max() / W.abs().max())
     assert err < 0.02, f"metadata-declared convrot not undone: err {err}"
 

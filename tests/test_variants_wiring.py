@@ -357,7 +357,7 @@ def test_ui_omni_resolves_seed_and_expands():
     try:
         with _wildcards({}, in_order=True):
             _ui_call("a {red|blue} car", "{blurry|noisy}", 1, -1, use_input=True,
-                     input_mode="Reference (Omni)", ref1=Image.new("RGB", (32, 32)))
+                     input_mode=cz_ui.EDIT_MODE, ref1=Image.new("RGB", (32, 32)))
     finally:
         cz_ui.generate_omni = real
     assert got, "generate_omni was not reached"
@@ -367,7 +367,7 @@ def test_ui_omni_resolves_seed_and_expands():
 
 
 def test_ui_omni_chains_the_upscale_when_asked():
-    """"Upscale after generate" was ignored in Reference (Omni), without a word: the Omni
+    """"Upscale after generate" was ignored in Edit (references), without a word: the Omni
     image must go through the Upscale like a txt2img image, and only when the box is ticked."""
     import cz_ui
     import cz_pipeline
@@ -385,7 +385,7 @@ def test_ui_omni_chains_the_upscale_when_asked():
 
     real = (cz_ui.generate_omni, cz_ui.process_one)
     cz_ui.generate_omni, cz_ui.process_one = fake_generate_omni, fake_process_one
-    omni = dict(use_input=True, input_mode="Reference (Omni)", ref1=Image.new("RGB", (32, 32)))
+    omni = dict(use_input=True, input_mode=cz_ui.EDIT_MODE, ref1=Image.new("RGB", (32, 32)))
     try:
         with _wildcards({}):
             _g, rep_on, _h, _h2 = _ui_call("a car", "", 1, 7, auto_upscale=True, **omni)
@@ -427,7 +427,7 @@ def test_ui_omni_runs_the_batch_and_the_detailer():
     try:
         with _wildcards({}, in_order=True):
             gal, rep, _h, _h2 = _ui_call("a {red|blue} car", "", 3, 10, use_input=True,
-                                         input_mode="Reference (Omni)",
+                                         input_mode=cz_ui.EDIT_MODE,
                                          ref1=Image.new("RGB", (32, 32)), detailer=True)
     finally:
         cz_ui.generate_omni, cz_detailer.detail_faces, cz_detailer.detail_hands = real

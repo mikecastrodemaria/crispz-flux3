@@ -117,6 +117,15 @@ dans `mp._blocks` (c'est là qu'on rattache `hook.owner`).
 
 ## 5. État au 28/10/2026 (lots A à F livrés, 0.1.0 fusionnée dans `main`)
 
+Après la 0.1.0 (28/10 soir) : 2K et 4K rendus natifs mesurés (3840x2160 en 113 s), presets
+2K / 4K dans Settings, curseurs jusqu'à 4096 ; fichiers CivitAI : bf16 single-file OK,
+INT8 comfy-quant déquantifié (fused qkv séparé, variante lue dans le fichier : le
+"Flux 3 Klein INT8" est le modèle BASE, config et blocs suivent le fichier), INT6 w6a8
+refusé dès le menu, GGUF Q4_K_M chargeable une fois le dtype de calcul épinglé
+(`cz_flux3._pin_compute_dtype` : diffusers annonce uint8 comme dtype d'un GGUF). CivitAI
+batch : GGUF inclus, note de hachage, catalogue rafraîchi. Validés sur CPU ; INT8 et GGUF
+restent à rendre sur la 5090 (demander la carte à Mike).
+
 Fait au lot F : README réécrit pour FLUX.3 avec les captures réelles (`assets/`, de nouveau
 versionné : capture de l'onglet Text to Image prise dans l'UI sur la 5090, rendus gen / edit /
 inpaint du e2e), README_CLI et drapeaux CLI `--flux3-model` / `--flux3-transformer` (les

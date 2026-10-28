@@ -63,6 +63,26 @@ L'encodeur Qwen3-VL-4B-Instruct est sous Apache 2.0. Le prompt upsampler
 | Refine img2img (force 0,35, 6 steps) | 2,3 s | 18,8 Go | 21,7 Go |
 | txt2img, Stop au 3e step | 1,4 s | 18,8 Go | 21,7 Go |
 
+**2K et 4K natifs** (même machine, 16 steps, offload `model` : le verdict en cache venait
+d'un plantage à deux modèles, les temps en `none` seront un peu meilleurs) :
+
+| Format | Pixels | Tokens | Temps | Pic réservé |
+|---|---|---|---|---|
+| 2048 x 2048 | 4,2 MP | 16384 | 52 s | 15,0 Go |
+| 2560 x 1440 | 3,7 MP | 14400 | 34 s | 14,1 Go |
+| 3840 x 2160 | 8,3 MP | 32400 | 113 s | 19,6 Go |
+
+Le 3840x2160 est aussi propre que le 1 MP (pas de sujet dupliqué, composition tenue) :
+FLUX.3 rend le 4K sans tuilage ni upscale. Les presets 2K et 4K de Settings en découlent
+(curseurs jusqu'à 4096 par côté, la borne que diffusers met à une image de référence).
+
+**Fichiers CivitAI** (page "Flux 3 Klein INT8/INT6/INT4", 28/10) : le bf16 single-file
+charge et rend (23,7 Go de pic) ; les INT8 comfy-quant sont déquantifiés en bf16 par le
+chargeur de klein (11 Go en VRAM, le gain est sur le disque) ; les INT6 `w6a8_int8` sont
+refusés dès le menu, aucun chargeur ne les reconstruit ; le GGUF Q4_K_M charge via
+GGUFQuantizationConfig une fois le dtype de calcul épinglé (diffusers annonce uint8 comme
+dtype d'un modèle GGUF et les blocs modulaires castaient les latents dessus).
+
 Les 18,8 Go résidents sont exactement le chiffre BFL pour la H100 en bf16 ; le pic à
 23,7 Go sur la première génération inclut l'échauffement des noyaux. Une 5090 fait donc
 tourner FLUX.3 bf16 entier, sans offload ; fp8r (14,4 Go annoncés) et nvfp4 (13,4 Go)

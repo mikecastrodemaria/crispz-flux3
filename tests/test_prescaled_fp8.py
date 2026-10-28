@@ -61,7 +61,9 @@ def _tiny(path, prescaled, both=False):
     sd = {"x_embedder.weight": (w1 if prescaled else w1 / s1).to(E4),
           "x_embedder.weight_scale": s1.float(),
           "context_embedder.weight": (w2 if both else w2 / s2).to(E4),
-          "context_embedder.weight_scale": s2.float()}
+          "context_embedder.weight_scale": s2.float(),
+          # a FLUX.3 block name: the loader checks the family before reading anything
+          "early_stream_modulations.0.lin.weight": torch.zeros(2, 2, dtype=torch.bfloat16)}
     save_file(sd, path)
     return w1, w2
 

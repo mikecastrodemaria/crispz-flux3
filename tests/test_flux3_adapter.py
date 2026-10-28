@@ -291,16 +291,24 @@ def test_load_transformer_tells_bfl_fp8r_and_nvfp4_from_a_plain_file(monkeypatch
     seen = _fake_single_file(monkeypatch)
     plain = os.path.join(TMP, "plain.safetensors")
     save_file({"mode_blocks.0.img_attn.qkv.weight": torch.zeros(2, 2)}, plain)
+    # BFL's fp8r: float8 weights next to the scale; nvfp4: uint8-packed + weight_scale_2
     fp8r = os.path.join(TMP, "fp8r.safetensors")
-    save_file({"mode_blocks.0.img_attn.qkv.weight": torch.zeros(2, 2),
+    save_file({"mode_blocks.0.img_attn.qkv.weight": torch.zeros(2, 2).to(torch.float8_e4m3fn),
                "mode_blocks.0.img_attn.qkv.weight_scale": torch.zeros(1)}, fp8r)
     nvfp4 = os.path.join(TMP, "nvfp4.safetensors")
-    save_file({"mode_blocks.0.img_attn.qkv.weight": torch.zeros(2, 2),
+    save_file({"mode_blocks.0.img_attn.qkv.weight": torch.zeros(2, 2, dtype=torch.uint8),
                "mode_blocks.0.img_attn.qkv.weight_scale": torch.zeros(1),
                "mode_blocks.0.img_attn.qkv.weight_scale_2": torch.zeros(1)}, nvfp4)
+    # ComfyUI's comfy-quant INT8 names its scales the same way: int8 weights + blobs,
+    # and it is NOT BFL's layout (it goes through the dequant loader instead)
+    comfy = os.path.join(TMP, "comfy_int8.safetensors")
+    save_file({"mode_blocks.0.img_attn.qkv.weight": torch.zeros(2, 2, dtype=torch.int8),
+               "mode_blocks.0.img_attn.qkv.weight_scale": torch.ones(1),
+               "mode_blocks.0.img_attn.qkv.comfy_quant": torch.zeros(4, dtype=torch.uint8)}, comfy)
     assert cz_flux3._bfl_quant_of(plain) is None
     assert cz_flux3._bfl_quant_of(fp8r) == "fp8r"
     assert cz_flux3._bfl_quant_of(nvfp4) == "nvfp4"
+    assert cz_flux3._bfl_quant_of(comfy) is None
     cz_flux3.load_transformer("repo/x", torch.bfloat16, single_file=plain)
     assert "quantization_config" not in seen["kw"]
     cz_flux3.load_transformer("repo/x", torch.bfloat16, single_file=fp8r)

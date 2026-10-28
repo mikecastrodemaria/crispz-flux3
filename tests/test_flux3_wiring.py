@@ -182,11 +182,32 @@ def test_load_transformer_routes_single_files_through_cz_flux3(engine, monkeypat
     # the base repo at the chosen precision
     assert P._load_transformer(None) == "tr"
     assert calls[-1][1]["precision"] == "fp8r" and calls[-1][1]["single_file"] is None
-    # a FLUX.3 single file
+    # a FLUX.3 single file in BFL's layout: separate projections, the flow-map embedder
+    # (= the distilled checkpoint) -> handed to diffusers by PATH, under the base repo
     ok = os.path.join(TMP, "flux3.safetensors")
-    save_file({"mode_blocks.0.img_attn.qkv.weight": torch.zeros(2, 2),
+    save_file({"mode_blocks.0.img_attn.q_proj.weight": torch.zeros(2, 2),
+               "ref_time_in.in_layer.weight": torch.zeros(2, 2),
                "early_stream_modulations.0.lin.weight": torch.zeros(2, 2)}, ok)
     assert P._load_transformer(ok) == "tr" and calls[-1][1]["single_file"] == ok
+    assert calls[-1][0][0] == P.BASE_REPO
+    # ComfyUI's layout of the BASE checkpoint (no flow-map embedder, fused qkv): read
+    # into RAM, the qkv split into q/k/v, and the architecture config taken from the
+    # -base repo, whatever repo lends the VAE and the encoder (CivitAI's INT8, 2026-10-28)
+    fused = os.path.join(TMP, "flux3_base_fused.safetensors")
+    save_file({"content_mode_blocks.image.0.qkv.weight": torch.arange(12.).reshape(6, 2),
+               "early_stream_modulations.0.lin.weight": torch.zeros(2, 2)}, fused)
+    assert P._file_variant(fused) == "base" and P._has_fused_qkv(fused)
+    assert P._load_transformer(fused) == "tr"
+    assert calls[-1][0][0] == cz_flux3.FLUX3_BASE
+    sd = calls[-1][1]["single_file"]
+    assert isinstance(sd, dict) and "content_mode_blocks.image.0.qkv.weight" not in sd
+    assert torch.equal(sd["content_mode_blocks.image.0.q_proj.weight"].float(), torch.arange(4.).reshape(2, 2))
+    assert torch.equal(sd["content_mode_blocks.image.0.v_proj.weight"].float(), torch.arange(8., 12.).reshape(2, 2))
+    # and the CFG policy follows the file while it is the transformer in use
+    monkeypatch.setattr(P, "ZIMAGE_TRANSFORMER", fused)
+    assert P.is_base_variant() is True
+    monkeypatch.setattr(P, "ZIMAGE_TRANSFORMER", ok)
+    assert P.is_base_variant() is False
     # a FLUX.2 single file is refused BEFORE any load, with the studio that runs it
     bad = os.path.join(TMP, "flux2.safetensors")
     save_file({"double_blocks.0.img_attn.qkv.weight": torch.zeros(2, 2),

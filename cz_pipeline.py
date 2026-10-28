@@ -148,8 +148,35 @@ def _hf_token():
 
 
 def is_base_variant(repo=None):
-    """True on the undistilled checkpoint (50 steps + real CFG + negative prompt)."""
+    """True on the undistilled checkpoint (50 steps + real CFG + negative prompt). With a
+    single-file transformer in use, the FILE decides (its tensor names say whether it is
+    the flow map or the base model), not the repo that lends the VAE and the encoder."""
+    if repo is None and ZIMAGE_TRANSFORMER and _is_single_file(ZIMAGE_TRANSFORMER):
+        v = _file_variant(ZIMAGE_TRANSFORMER)
+        if v:
+            return v == "base"
     return cz_flux3.is_base_repo(repo or BASE_REPO)
+
+
+def _file_variant(path):
+    """'base' / 'distilled' of a single-file transformer from its tensor names, None when
+    they cannot be read. Cached with the family (same header read)."""
+    try:
+        st = os.stat(path)
+        key = ("variant", path, st.st_size, st.st_mtime)
+    except OSError:
+        return None
+    if key not in _FAMILY_CACHE:
+        _FAMILY_CACHE[key] = cz_flux3.variant_from_keys(_file_tensor_names(path))
+    return _FAMILY_CACHE[key]
+
+
+def _variant_repo_for(variant):
+    """The official repo whose config matches `variant`, keeping a local or mirror base
+    repo when it already is of that variant."""
+    if cz_flux3.variant_of(BASE_REPO) == variant:
+        return BASE_REPO
+    return cz_flux3.FLUX3_BASE if variant == "base" else cz_flux3.FLUX3_DISTILLED
 
 # Replacement text encoder (Models > Checkpoints > Text encoder). Empty = the one from
 # the base repo, as before. Otherwise a FOLDER in transformers format (config.json +
@@ -1628,6 +1655,15 @@ def _lora_unsupported(path):
     return None
 
 
+# The comfy-quant formats _load_dequant_state_dict reconstructs exactly: per-tensor or
+# per-row scales on 8-bit weights, with or without the grouped Hadamard rotation. Anything
+# else declared in _quantization_metadata (w6a8_int8 = 6-bit weights with group scales,
+# w4a16, nvfp4 from ModelOpt...) is refused by name in _load_transformer.
+_DEQUANT_FORMATS = {"int8_tensorwise", "int8", "fp8_e4m3fn", "fp8_e4m3fn_tensorwise",
+                    "fp8_e5m2", "float8_e4m3fn", "float8_e5m2", "fp8", "fp8_scaled",
+                    "mxfp8"}
+
+
 def _quant_metadata_formats(hdr):
     """The quantization formats declared in __metadata__._quantization_metadata
     (ComfyUI, NVIDIA ModelOpt), lowercased. An empty set when the file declares none. It is
@@ -1974,6 +2010,35 @@ def _apply_quant_scale(t, s, key, path, cfg=None):
         f"input dimension. Please report the file.")
 
 
+def _has_fused_qkv(path):
+    """True when the single file carries ComfyUI's fused '<block>.qkv.weight' tensors."""
+    try:
+        return any(k.endswith(".qkv.weight") for k in _safetensors_header(path)
+                   if k != "__metadata__")
+    except Exception:
+        return False
+
+
+def _split_fused_qkv(sd):
+    """ComfyUI fuses the attention projections of FLUX.3 into one '<block>.qkv.weight' of
+    shape [3 * hidden, in]; BFL's layout and diffusers' converter want q_proj / k_proj /
+    v_proj. Split in that order (ComfyUI's, checked against the bf16 single file of the
+    same page: identical shapes [3072, 3072] x 3). Returns how many were split."""
+    n = 0
+    for k in [k for k in sd if k.endswith(".qkv.weight")]:
+        w = sd.pop(k)
+        if w.dim() != 2 or w.shape[0] % 3:
+            sd[k] = w
+            continue
+        q, kk, v = torch.chunk(w, 3, dim=0)
+        stem = k[:-len("qkv.weight")]
+        sd[stem + "q_proj.weight"] = q.contiguous()
+        sd[stem + "k_proj.weight"] = kk.contiguous()
+        sd[stem + "v_proj.weight"] = v.contiguous()
+        n += 1
+    return n
+
+
 def _load_dequant_state_dict(path):
     """Loads a ComfyUI single-file into RAM and returns it IN THE DIFFUSERS LAYOUT,
     dequantized to DTYPE (bf16) tensor by tensor. Serves both cases: quantized (FP8/INT8
@@ -2004,13 +2069,14 @@ def _load_dequant_state_dict(path):
     if any(k.startswith(_COMFY_PREFIX) for k, _ in entries):
         prefix = _COMFY_PREFIX
         entries = [(k, v) for k, v in entries if k.startswith(prefix)]
-    # Architecture guard: a quantized checkpoint of ANOTHER model (keys without a
-    # single Qwen-Image marker) would load incoherent weights -> a clear refusal.
-    if not any(any(m in k[len(prefix):] for m in _QWEN_KEY_MARKERS) for k, _ in entries):
+    # Architecture guard: a quantized checkpoint of ANOTHER model would load incoherent
+    # weights -> a clear refusal. The family is read from the block names, the same
+    # reading as the checkpoint menu (cz_flux3.family_from_keys).
+    if cz_flux3.family_from_keys(k[len(prefix):] for k, _ in entries) != "flux3":
         raise RuntimeError(
             f"{os.path.basename(path)}: quantized checkpoint does not look like a "
-            "FLUX.2 transformer (different architecture); this build only loads "
-            "FLUX.2 Klein models.")
+            "FLUX.3 Image Klein transformer (different architecture); this build only "
+            "loads FLUX.3 models.")
     # SEQUENTIAL read in the file's PHYSICAL order (data_offsets): a HDD collapses on
     # random access, and the key order does not follow the data's.
     entries.sort(key=lambda kv: kv[1].get("data_offsets", [0])[0])
@@ -2032,6 +2098,7 @@ def _load_dequant_state_dict(path):
             _dbg(f"quantization metadata: {len(qcfg)} layer(s) declared in header")
     except Exception as e:
         _dbg(f"_quantization_metadata unreadable: {e}")
+    n_blob = 0
     with safe_open(path, framework="pt", device="cpu") as f:
         for k, _ in entries:
             kk = k[len(prefix):]
@@ -2042,7 +2109,17 @@ def _load_dequant_state_dict(path):
                 except Exception as e:
                     _dbg(f"comfy_quant blob unreadable {k}: {e}")
                 continue
+            if kk.endswith(".config") or ".comfy_attention." in kk:
+                # ComfyUI's FLUX.3 INT8 builds (2026-10-28) carry one
+                # '<block>.comfy_attention.config' uint8 blob per block: a JSON of
+                # attention settings, not a weight. Left in, it reached from_single_file
+                # as a bf16 "weight" the converter could not place, and the whole model
+                # stayed on 'meta' ("Cannot copy out of meta tensor").
+                n_blob += 1
+                continue
             raw[kk] = f.get_tensor(k)
+    if n_blob:
+        _dbg(f"dropped {n_blob} comfy config blob(s)")
     # The dequantization work (fp32 cast + scales + un-rotation) is MEMORY BANDWIDTH
     # bound on the CPU (measured on crispz-krea2: ~9 min on a 12.9B INT8): so it runs on
     # the GPU when there is one, tensor by tensor (a few hundred MB of VRAM at most), with
@@ -2097,6 +2174,9 @@ def _load_dequant_state_dict(path):
             t = t.to(DTYPE)
         sd[k] = t
     raw.clear()
+    n_split = _split_fused_qkv(sd)
+    if n_split:
+        _dbg(f"split {n_split} fused qkv tensor(s) into q/k/v projections")
     if dev != "cpu":
         try:
             torch.cuda.empty_cache()
@@ -2335,6 +2415,21 @@ def _flux3_file_refusal(path):
         return ("no FLUX.3 transformer tensor in it (a VAE, a text encoder, or "
                 "another model family); crispz-flux3 only loads FLUX.3 Image Klein "
                 "transformers")
+    if not _is_gguf_path(path):
+        # A comfy-quant format with no dequant here (w6a8_int8 = 6-bit weights with group
+        # scales, the "INT6" builds of CivitAI's FLUX.3 pages): said in the listing, with
+        # the alternative, rather than at load time. The INT8 / FP8 'scaled' builds pass
+        # and are dequantized by _load_transformer.
+        try:
+            odd = sorted(f for f in _quant_metadata_formats(_safetensors_header(path))
+                         if f not in _DEQUANT_FORMATS)
+        except Exception:
+            odd = []
+        if odd:
+            return (f"comfy-quant '{odd[0]}' build (6-bit or packed weights): crispz-flux3 "
+                    f"dequantizes the INT8 and FP8 'scaled' builds only. Take the INT8, "
+                    f"bf16 or GGUF file of the same page, or BFL's fp8r / nvfp4 variant "
+                    f"(Precision selector)")
     return None
 
 
@@ -3612,28 +3707,62 @@ def _load_transformer(path=None, base=None):
     The architecture always comes from `base` (config=..., subfolder='transformer').
     Used both on a full load AND for the hot swap (_swap_transformer).
 
-    crispz-klein's loader (ComfyUI 'scaled' FP8 / INT8 dequantized in RAM, the dequant
-    disk cache, the ComfyUI prefix stripping) is NOT ported: FLUX.3 ships its own fp8r
-    and nvfp4 files, and the diffusers 0.42 converter reads the ComfyUI layout. A ComfyUI
-    'scaled' FP8 FLUX.3 file, should one appear, is handed over as is, and that is said.
+    ComfyUI 'scaled' INT8 / FP8 builds (what CivitAI publishes FLUX.3 as, e.g. "Flux 3
+    Klein INT8/INT6/INT4" on 2026-10-28: I8 weights + weight_scale + comfy_quant blobs,
+    convrot included) are DEQUANTIZED to bf16 in RAM by crispz-klein's loader, then handed
+    to from_single_file as a state dict: they load, at the memory cost of a full bf16
+    transformer (the saving is disk and download, not VRAM). The w6a8 INT6 builds of the
+    same pages (6-bit weights, weight_s_channel / weight_s_rel scales) have no dequant
+    here and are refused with the alternative. The dequant disk cache of crispz-klein is
+    not ported: a 5 GB INT8 dequantizes in about a minute on the GPU.
 """
     path = ZIMAGE_TRANSFORMER if path is None else path
     base = BASE_REPO if base is None else base
+    src = path or None
     if path and _is_single_file(path):
         why = _flux3_file_refusal(path)
         if why:
             raise RuntimeError(f"{os.path.basename(path)}: {why}")
+        # The architecture config must be the file's VARIANT's: the base checkpoint has no
+        # target-timestep embedder, the distilled one has it. Loaded under the other
+        # repo's config, the model is built with weights the file does not carry and
+        # stays on 'meta' (CivitAI's "Flux 3 Klein INT8" is the base model, 2026-10-28).
+        fv = _file_variant(path)
+        if fv and cz_flux3.variant_of(base) != fv:
+            want = _variant_repo_for(fv)
+            _log(f"{os.path.basename(path)} is the {fv.upper()} FLUX.3 checkpoint while the "
+                 f"base repo is {base}: its architecture config is read from {want} "
+                 f"(VAE and text encoder still come from {base}). "
+                 + ("50 steps and a real CFG apply." if fv == "base" else "16 steps, no CFG."))
+            base = want
         if not _is_gguf_path(path) and not cz_flux3._bfl_quant_of(path):
+            fmts = _quant_metadata_formats(_safetensors_header(path))
+            odd = sorted(f for f in fmts if f not in _DEQUANT_FORMATS)
+            if odd:
+                raise RuntimeError(
+                    f"{os.path.basename(path)}: comfy-quant '{odd[0]}' build (6-bit or "
+                    f"packed weights, group scales). crispz-flux3 dequantizes the INT8 and "
+                    f"FP8 'scaled' builds only: take the INT8, bf16 or GGUF file of the "
+                    f"same page, or BFL's fp8r / nvfp4 variant (Precision selector).")
             dq = _safetensors_dequant(path)
             if dq:
-                _log(f"{os.path.basename(path)} is a ComfyUI '{dq}' build: crispz-flux3 "
-                     f"has no dequant loader for FLUX.3 (crispz-klein had one), the file "
-                     f"goes to diffusers as is. If the load fails or the image is flat, "
-                     f"use the bf16 build or BFL's fp8r variant (`flux3_precision`).")
+                _log(f"{os.path.basename(path)} is a ComfyUI '{dq}' build: dequantized to "
+                     f"bf16 in RAM before loading (the footprint of a full bf16 "
+                     f"transformer, ~11 GB; the saving was disk and download). For a "
+                     f"lighter run use BFL's fp8r / nvfp4 variant (Precision) or a GGUF.")
+                src = _load_monitor(f"dequantizing {os.path.basename(path)} ({dq})",
+                                    lambda: _load_dequant_state_dict(path))
+            elif _has_fused_qkv(path):
+                # ComfyUI's layout fuses q/k/v into one 'qkv' tensor per block; diffusers'
+                # converter knows the separate projections only. Read into RAM and split.
+                _log(f"{os.path.basename(path)}: ComfyUI layout with fused qkv, read and "
+                     f"split in RAM before loading.")
+                src = _load_monitor(f"reading {os.path.basename(path)} (fused qkv)",
+                                    lambda: _load_dequant_state_dict(path))
     label = (f"transformer {os.path.basename(path)}" if path
              else f"transformer {base} ({PRECISION})")
     return _load_monitor(label, lambda: cz_flux3.load_transformer(
-        base, DTYPE, precision=PRECISION, single_file=path or None, token=_hf_token()))
+        base, DTYPE, precision=PRECISION, single_file=src, token=_hf_token()))
 
 
 def _lora_names(loras):
@@ -4243,9 +4372,13 @@ def _ensure_base():
          + (f", ~{_need:.0f} GB of weights" if _need else "")
          + ") ... first run downloads it from HF, then cached")
     try:
+        # A single-file transformer of the OTHER variant than the repo's (CivitAI's INT8 is
+        # the base model under the distilled repo): the block chain, the CFG policy and the
+        # defaults follow the FILE; the repo only lends its VAE and text encoder.
+        _variant = "base" if is_base_variant() else "distilled"
         pipe = _load_monitor(f"FLUX.3 Image Klein {BASE_REPO}",  # noqa: E128
                              lambda: cz_flux3.load(BASE_REPO, dtype=DTYPE, precision=PRECISION,
-                                                   transformer=tr))
+                                                   transformer=tr, variant=_variant))
     except Exception as e:
         hint = _hf_access_hint(BASE_REPO, e)
         if hint:
@@ -4308,8 +4441,8 @@ def _ensure_base():
     _BASE_PIPE = pipe
     _DERIVED = {"txt2img": pipe}
     _LOADED_KEY = key
-    _log(f"FLUX.3 Image Klein ready in {time.time() - t0:.1f}s ({cz_flux3.variant_of(BASE_REPO)}, "
-         f"{cz_flux3.DEFAULTS[cz_flux3.variant_of(BASE_REPO)]['steps']} steps advised)")
+    _log(f"FLUX.3 Image Klein ready in {time.time() - t0:.1f}s ({_variant}, "
+         f"{cz_flux3.DEFAULTS[_variant]['steps']} steps advised)")
     return pipe
 
 

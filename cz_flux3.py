@@ -164,6 +164,28 @@ def variant_of(repo):
     return "base" if is_base_repo(repo) else "distilled"
 
 
+# The distilled checkpoint is a flow map: it embeds the timestep it jumps TO through a
+# second embedder, 'ref_time_in' in BFL's / ComfyUI's layout, 'target_timestep_embedder'
+# in diffusers'. The base (undistilled) checkpoint has no such weights. That is how a
+# single file tells its own variant, whatever its name or the repo it is loaded under:
+# CivitAI's "Flux 3 Klein INT8" turned out to be the BASE model (2026-10-28) and, loaded
+# with the distilled repo's config, it died on missing weights ("meta tensor").
+_DISTILLED_MARKERS = ("ref_time_in.", "target_timestep_embedder.")
+
+
+def variant_from_keys(keys):
+    """'distilled' when the tensor names carry the flow-map embedder, else 'base'. None
+    when there are no names at all."""
+    seen = False
+    for k in keys:
+        if not isinstance(k, str):
+            continue
+        seen = True
+        if any(m in k for m in _DISTILLED_MARKERS):
+            return "distilled"
+    return "base" if seen else None
+
+
 # --- The step hook ------------------------------------------------------------------
 class _Interrupted(Exception):
     """Raised by the step hook when `_interrupt` is set: unwinds the modular loop, which
@@ -674,6 +696,32 @@ def is_gguf(path):
     return isinstance(path, str) and path.lower().endswith(".gguf")
 
 
+def _pin_compute_dtype(model, dtype):
+    """Makes `model.dtype` answer the COMPUTE dtype on a quantized transformer.
+
+    The FLUX.3 modular blocks take the dtype of every tensor they prepare (latents, text
+    embeddings, timesteps) from `components.transformer.dtype`. diffusers' ModelMixin
+    reports the first parameter's dtype there: torch.uint8 on a GGUF (the Q4_K blocks),
+    torch.float8_e4m3fn on BFL's fp8r file. The latents were then cast to uint8 and the
+    first linear died on "expected mat1 and mat2 to have the same dtype: unsigned char !=
+    BFloat16" (measured on the 5090 with unsloth's Q4_K_M, 2026-10-28). The GGUF and BFL
+    linears dequantize to their compute dtype inside their forward, so bf16 inputs are
+    what they expect. The override is a dynamic subclass with a `dtype` property: the
+    model keeps its class name, isinstance checks and everything else."""
+    if not isinstance(model, torch.nn.Module):      # a test double, nothing to pin
+        return model
+    try:
+        if model.dtype == dtype:
+            return model
+    except Exception:
+        pass
+    base = type(model)
+    pinned = type(base.__name__, (base,), {"dtype": property(lambda self: dtype),
+                                           "_crispz_pinned_dtype": dtype})
+    model.__class__ = pinned
+    return model
+
+
 def load_transformer(repo, dtype, precision="bf16", single_file=None, token=None):
     """The FLUX.3 transformer: a single-file override first (a community .safetensors in
     BFL's or ComfyUI's layout, converted by diffusers; a BFL fp8r / nvfp4 file, kept
@@ -695,7 +743,8 @@ def load_transformer(repo, dtype, precision="bf16", single_file=None, token=None
         elif _bfl_quant_of(single_file):
             from diffusers import BFLQuantizationConfig
             kw["quantization_config"] = BFLQuantizationConfig(compute_dtype=dtype)
-        return Flux3Transformer2DModel.from_single_file(single_file, **kw)
+        model = Flux3Transformer2DModel.from_single_file(single_file, **kw)
+        return _pin_compute_dtype(model, dtype) if "quantization_config" in kw else model
     precision = (precision or "bf16").lower()
     if precision in _VARIANT_FILE:
         from diffusers import BFLQuantizationConfig
@@ -704,9 +753,10 @@ def load_transformer(repo, dtype, precision="bf16", single_file=None, token=None
             path = os.path.join(repo, _VARIANT_FILE[precision])
         else:
             path = hf_hub_download(repo, _VARIANT_FILE[precision], token=token)
-        return Flux3Transformer2DModel.from_single_file(
+        model = Flux3Transformer2DModel.from_single_file(
             path, config=repo, subfolder="transformer", torch_dtype=dtype, token=token,
             quantization_config=BFLQuantizationConfig(compute_dtype=dtype))
+        return _pin_compute_dtype(model, dtype)
     kw = {"subfolder": "transformer", "torch_dtype": dtype}
     if token:
         kw["token"] = token
@@ -714,8 +764,15 @@ def load_transformer(repo, dtype, precision="bf16", single_file=None, token=None
 
 
 def _bfl_quant_of(path):
-    """'fp8r' / 'nvfp4' when a single file carries BFL's scale tensors, else None (a
-    .gguf, a state dict, an unreadable file)."""
+    """'fp8r' / 'nvfp4' when a single file carries BFL's quantized layout, else None (a
+    .gguf, a state dict, an unreadable file, or a ComfyUI comfy-quant file).
+
+    The 'weight_scale' suffix alone is NOT proof: ComfyUI's comfy-quant INT8 builds (what
+    CivitAI publishes FLUX.3 as) name their scales the same way. Handed to diffusers as
+    fp8r, such a file died on "...weight is torch.int8, but the fp8r layout expects
+    torch.float8_e4m3fn" (2026-10-28). BFL's files are told by the WEIGHT dtype next to
+    the scale (float8 for fp8r, uint8-packed + weight_scale_2 for nvfp4) and by the
+    absence of comfy_quant blobs and of ComfyUI's _quantization_metadata."""
     if not isinstance(path, str) or is_gguf(path):
         return None
     try:
@@ -725,22 +782,34 @@ def _bfl_quant_of(path):
             hdr = json.loads(f.read(min(n, 10_000_000)).decode("utf-8", "ignore"))
     except Exception:
         return None
+    meta = hdr.get("__metadata__") or {}
+    if isinstance(meta, dict) and meta.get("_quantization_metadata"):
+        return None                                   # ComfyUI / ModelOpt declare theirs here
     keys = [k for k in hdr if k != "__metadata__"]
-    if any(k.endswith("weight_scale_2") for k in keys):
+    if any(k.endswith(".comfy_quant") for k in keys):
+        return None
+    scaled = [k[:-len("_scale")] for k in keys if k.endswith("weight_scale")]
+    if not scaled:
+        return None
+    dtypes = {str((hdr.get(w) or {}).get("dtype", "")).upper() for w in scaled if w in hdr}
+    if any(k.endswith("weight_scale_2") for k in keys) and dtypes <= {"U8", "UINT8", "F8_E4M3", ""}:
         return "nvfp4"
-    if any(k.endswith("weight_scale") for k in keys):
+    if dtypes and dtypes <= {"F8_E4M3", "F8_E5M2"}:
         return "fp8r"
     return None
 
 
 def load(repo, dtype=torch.bfloat16, precision="bf16", transformer=None, text_encoder=None,
-         token=None):
+         token=None, variant=None):
     """Builds a ready Flux3Pipe for `repo` (on the CPU: the caller places it).
 
     transformer: an already-loaded Flux3Transformer2DModel (single-file override) or
     None for the repo's own at `precision`. text_encoder: an (encoder, processor) pair
-    to reuse, or None to load the repo's."""
-    base = is_base_repo(repo)
+    to reuse, or None to load the repo's. variant: 'base' / 'distilled' to force the block
+    chain and the defaults (a single-file override of the OTHER variant than the repo's:
+    the transformer decides, not the repo that lends its VAE and encoder); None = the
+    repo's own."""
+    base = (variant == "base") if variant in ("base", "distilled") else is_base_repo(repo)
     blocks = build_blocks(base=base)
     mp = blocks.init_pipeline(repo)
     if transformer is None:

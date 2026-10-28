@@ -1,6 +1,6 @@
 """Out-of-VRAM recovery (crispz-klein 1.36.4).
 
-A Reference (Omni) batch with Upscale after generate and the detailer ran out of VRAM
+A Edit (references) batch with Upscale after generate and the detailer ran out of VRAM
 at the fourth image, then every later render failed until the app was restarted.
 Covers:
   - is_oom recognizes both forms (torch allocator, direct CUDA call);
@@ -195,7 +195,7 @@ def _omni(fake_generate_omni):
     try:
         with _Releases() as rel, _wildcards({}):
             gal, rep, _h, _h2 = _ui_call("a car", "", 1, 7, use_input=True,
-                                         input_mode="Reference (Omni)",
+                                         input_mode=cz_ui.EDIT_MODE,
                                          ref1=Image.new("RGB", (32, 32)))
     finally:
         cz_ui.generate_omni = real
@@ -233,7 +233,7 @@ def test_ui_omni_reports_what_to_lower_when_the_retry_fails():
 
     gal, rep, releases = _omni(fake_generate_omni)
     assert not gal, gal
-    assert "Omni error" in rep and "VRAM full" in rep and "restart" in rep, rep
+    assert "Edit error" in rep and "VRAM full" in rep and "restart" in rep, rep
     assert releases == [True, True], releases
 
 

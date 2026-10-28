@@ -2,7 +2,7 @@
 
 TWO LoRA SETS. The BASE set (cz_pipeline.LORAS) is applied on every generation;
 the EDIT set (EDIT_LORAS) is only applied by _ui_generate's omni branch --
-use_input + the "Reference (Omni)" mode + at least one reference image. So an axis that
+use_input + the U.EDIT_MODE mode + at least one reference image. So an axis that
 varied the edit weight on a txt2img grid would render N IDENTICAL images, with no error
 and no explanation: the worst possible outcome. The axis refuses that
 case, saying what to tick.
@@ -28,7 +28,7 @@ def _vals(edit=False):
     v = [None] * 36
     v[U._Q_IDX["prompt"]] = "a cat"
     v[U._Q_IDX["use_input"]] = bool(edit)
-    v[U._Q_IDX["input_mode"]] = "Reference (Omni)" if edit else "Image to image"
+    v[U._Q_IDX["input_mode"]] = U.EDIT_MODE if edit else "Image to image"
     if edit:
         v[U._Q_REF_IDX[0]] = object()          # one reference is enough
     return v
@@ -112,7 +112,7 @@ def test_a_txt2img_grid_is_refused_not_silently_useless():
     never applied. Rendering N identical images would be worse than an error."""
     _v, err = U._xyz_validate_axis("Edit LoRA weight", ["0.4"], _vals(edit=False), _ms())
     assert err and "EDIT run" in err, err
-    assert "Reference (Omni)" in err and "identical" in err, err
+    assert U.EDIT_MODE in err and "identical" in err, err
     print("OK test_a_txt2img_grid_is_refused_not_silently_useless")
 
 

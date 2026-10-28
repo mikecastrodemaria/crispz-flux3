@@ -150,7 +150,7 @@ lora_slots              Number of LoRA slots shown in Models > LoRA (1..10, defa
                         Each slot = a dropdown + weight; all combine at generation.
 zimage_omni_model       REMOVED on crispz-flux3. There is no separate edit model:
 zimage_omni_base        Flux2KleinPipeline takes a list of reference images, so the
-                        Reference (Omni) tab and the protocol op 'edit' run on the
+                        Edit (references) tab and the protocol op 'edit' run on the
                         BASE model. Changing the checkpoint changes the editor too.
                         Do not re-add these keys when merging from the upstream forks.
 
@@ -232,7 +232,7 @@ civitai_api_key         Optional CivitAI API token. In the Asset Browser (LoRAs/
                         models work without one.
 date_subfolders         true (default) -> save into out/YYYY-MM-DD/ subfolders
                         (like Fooocus). The galleries/Asset Browser scan recursively.
-save_pre_upscale        false (default). true -> in txt2img or Reference (Omni) + auto-upscale,
+save_pre_upscale        false (default). true -> in txt2img or Edit (references) + auto-upscale,
                         ALSO save the original image (before ESRGAN/refine), tagged 'txt2img'
                         or 'omni', next to the final upscaled one. Toggle in Advanced >
                         Generation.

@@ -111,6 +111,13 @@ PRESET_FLAGMAP = {
     "cpu_offload": "--cpu-offload",
 }
 
+# The visible name of the multi-reference editing mode. "Omni" was crispz-qwen-edit's
+# vocabulary (the Qwen-Image-Edit "Omni" model); on FLUX.3 it is plain editing from
+# references cited as <ref_image_N>. The INTERNAL names stay (generate_omni, OMNI_MODEL,
+# the 'omni' mode in the metadata, the protocol's op 'edit'): cz_cli, cz_protocol and the
+# other crispz apps import them. Only the words a user reads change (2026-10-28).
+EDIT_MODE = "Edit (references)"
+
 # Fooocus-style aspect ratios. label -> (width, height) in multiples of 16.
 ASPECT_RATIOS = {
     "1024 x 1024  (1:1)":  (1024, 1024),
@@ -130,6 +137,30 @@ ASPECT_RATIOS = {
     "864 x 1536  (9:16)":  (864, 1536),
     "1536 x 640  (21:9)":  (1536, 640),
     "640 x 1536  (9:21)":  (640, 1536),
+    # --- 2K and 4K: FLUX.3 renders them NATIVELY, no tiling, no upscale. Measured on an
+    # RTX 5090 in bf16 on 2026-10-28 (16 steps, CPU offload 'model', see FORK.md):
+    # 2048x2048 in 52 s, 2560x1440 in 34 s, 3840x2160 in 113 s, the 4K as clean as the
+    # 1 MP renders (no duplicated subject, coherent composition). diffusers caps a
+    # REFERENCE image at 4 MP / 4096 px a side, which is also the slider ceiling here. The
+    # cost follows the token count (1 MP = 4096 tokens, 4 MP = 16384, 8.3 MP = 32400).
+    # Exact ratios, multiples of 16.
+    "2K  2048 x 2048  (1:1)":    (2048, 2048),
+    "2K  2304 x 1728  (4:3)":    (2304, 1728),
+    "2K  1728 x 2304  (3:4)":    (1728, 2304),
+    "2K  2432 x 1600  (3:2)":    (2432, 1600),
+    "2K  1600 x 2432  (2:3)":    (1600, 2432),
+    "2K  2560 x 1600  (16:10)":  (2560, 1600),
+    "2K  1600 x 2560  (10:16)":  (1600, 2560),
+    "2K  2560 x 1440  (16:9)":   (2560, 1440),
+    "2K  1440 x 2560  (9:16)":   (1440, 2560),
+    "2K  2944 x 1264  (21:9)":   (2944, 1264),
+    "FHD  1920 x 1088  (16:9)":  (1920, 1088),
+    "4K  3840 x 2160  (16:9)":   (3840, 2160),
+    "4K  2160 x 3840  (9:16)":   (2160, 3840),
+    "4K  2880 x 2880  (1:1)":    (2880, 2880),
+    "4K  3456 x 2304  (3:2)":    (3456, 2304),
+    "4K  2304 x 3456  (2:3)":    (2304, 3456),
+    "4K  4096 x 1760  (21:9)":   (4096, 1760),
 }
 # A list sorted from the squarest to the widest, each format followed by its portrait
 # counterpart. The 1536 entries (3:2, 16:9) and the 5:4 / 4:3 ones are EXACT ratios, the ones
@@ -706,13 +737,24 @@ def _profile_for_checkpoint(path):
         return st, g, (f" Settings from the CivitAI consensus of "
                        f"{reco.get('n', '?')} community image(s) — the sampler is not "
                        f"applied here, use _Apply CivitAI recommended settings_ for that.")
-    # 2. No consensus, but the page says the model is NOT distilled.
-    if "undistil" in name.lower():
+    # 2. No consensus, but the page says the model is NOT distilled: by its name, by the
+    #    CivitAI base-model label ("Flux.3 Klein-base" on the INT8 of 2026-10-28), or by
+    #    the file's own tensors (no flow-map embedder = the base checkpoint).
+    base_label = str(civ.get("baseModel") or "").lower()
+    file_variant = None
+    try:
+        file_variant = cz_pipeline._file_variant(path)
+    except Exception:
+        pass
+    if "undistil" in name.lower() or base_label.endswith("-base") or file_variant == "base":
         preset, st, g = _undistilled_profile()
         if preset:
-            return st, g, (f" Its CivitAI page calls it **undistilled**, so the "
-                           f"distilled profile (16 steps, no CFG) would render mush: "
-                           f"applied _{preset}_ instead.")
+            why = ("its CivitAI page calls it **undistilled**" if "undistil" in name.lower()
+                   else "CivitAI labels it **Flux.3 Klein-base**" if base_label.endswith("-base")
+                   else "its tensors carry no flow-map embedder: it is the **base** checkpoint")
+            return st, g, (f" {why[:1].upper() + why[1:]}, so the distilled profile (16 "
+                           f"steps, no CFG) would leave it unfinished: applied _{preset}_ "
+                           f"instead.")
     # 2b. The FILE NAME of the official undistilled release ('flux-3-image-klein-base',
     #     and crispz-klein's 'flux-2-klein-base-4b' in a shared library). An official file
     #     = no CivitAI page, so no sidecar. Kept from crispz-klein, where the distilled
@@ -1194,7 +1236,7 @@ def _ui_set_omni_model(repo):
         _save_prefs_keys({"zimage_omni_model": cz_pipeline.OMNI_MODEL})
     except Exception:
         pass
-    note = f"Omni model set: `{repo or '(none)'}` (applied on the next edit, saved)."
+    note = f"Edit model set: `{repo or '(none)'}` (applied on the next edit, saved)."
     sp = cz_pipeline.EDIT_SPEED
     if sp and sp.get("path"):
         try:
@@ -1206,12 +1248,12 @@ def _ui_set_omni_model(repo):
 
 
 def _ui_edit_generate(*args, progress=gr.Progress(track_tqdm=True)):
-    """The 'Edit' button of the Reference (Omni) tab: the same run as Generate, but forces
-    use_input=True and input_mode='Reference (Omni)' (positions 4 and 6 of _ui_generate)
+    """The 'Edit' button of the Edit (references) tab: the same run as Generate, but forces
+    use_input=True and input_mode=EDIT_MODE (positions 4 and 6 of _ui_generate)
     -> no need to tick Input Image nor to change the mode above any more."""
     args = list(args)
     args[4] = True
-    args[6] = "Reference (Omni)"
+    args[6] = EDIT_MODE
     return _ui_generate(*args, progress=progress)
 
 
@@ -2310,11 +2352,11 @@ def _ui_generate(prompt, negative, styles, style_random, use_input, input_image,
         # (a stale UI in the browser, the mode left on Omni) we fall back to
         # txt2img/img2img instead of failing.
         omni_ready = bool((cz_pipeline.OMNI_MODEL or "").strip())
-        if use_input and input_mode == "Reference (Omni)" and omni_ready:
+        if use_input and input_mode == EDIT_MODE and omni_ready:
             refs = [r for r in [ref1, ref2, ref3, ref4] if r is not None]
             _dbg(f"omni: {len(refs)} ref(s), size={int(width)}x{int(height)}")
             if not refs:
-                return _done([], "Omni: add at least one reference image.")
+                return _done([], "Edit: add at least one reference image.")
             # As in txt2img: an "Image number" batch (each image replays the
             # composition with seed+i, and the variants, wildcards and random style are
             # drawn again per image), then upscale and the detailer. Omni only made one
@@ -2337,7 +2379,7 @@ def _ui_generate(prompt, negative, styles, style_random, use_input, input_image,
                 except Exception as e:
                     _log(f"omni error: {e}")
                     # The images already produced stay displayed and saved.
-                    return _done(images, "  \n".join(notes + [f"Omni error: {e}{_vram_hint(e)}"]),
+                    return _done(images, "  \n".join(notes + [f"Edit error: {e}{_vram_hint(e)}"]),
                                  img_paths)
                 total_t += time.time() - t0
                 tag, gmode = "omni", "omni"
@@ -3029,7 +3071,7 @@ _XYZ_AXES = {
     "LoRA weight":  {"kind": "lora_weight"},
     # The weight of the EDIT set (the omni pipe), distinct from the base set. It only
     # has an effect on an EDIT job: _ui_generate only applies EDIT_LORAS on its omni branch
-    # (use_input + the "Reference (Omni)" mode + at least one reference). The axis checks
+    # (use_input + the EDIT_MODE mode + at least one reference). The axis checks
     # that and REFUSES rather than rendering N identical images without a word.
     "Edit LoRA weight": {"kind": "edit_lora_weight"},
     # Comparing several LoRAs in slot 1: epochs of the same training run, CivitAI
@@ -3217,11 +3259,11 @@ def _xyz_validate_axis(name, raw_values, base_vals, base_ms):
         # images, with no error and no explanation -- the worst possible outcome.
         # So it is refused here, saying what to tick.
         if not (base_vals[_Q_IDX["use_input"]]
-                and str(base_vals[_Q_IDX["input_mode"]]) == "Reference (Omni)"
+                and str(base_vals[_Q_IDX["input_mode"]]) == EDIT_MODE
                 and any(base_vals[i] is not None for i in _Q_REF_IDX)):
             return None, ("Edit LoRA weight only bites on an EDIT run, and this grid "
                           "is not one: tick 'Use input image', set the mode to "
-                          "'Reference (Omni)', add at least one reference image, then "
+                          f"'{EDIT_MODE}', add at least one reference image, then "
                           "rebuild. (On a txt2img grid the edit set is never applied "
                           "-- every cell would come out identical.)")
         if not base_ms.get("edit_loras_enabled", True):
@@ -4167,7 +4209,7 @@ def build_ui():
                     # The txt2img -> upscale chaining (left) + Improve prompt (right), aligned.
                     auto_upscale_cb = gr.Checkbox(
                         value=bool(CONFIG.get("default_auto_upscale", False)), scale=4,
-                        label="Upscale after generate — chain each txt2img or Reference (Omni) image "
+                        label="Upscale after generate: chain each txt2img or Edit (references) image "
                               "through the Upscale pipeline (ESRGAN + refine), no manual step")
                     improve_btn = gr.Button("Improve prompt", scale=1, min_width=130,
                                             visible=IMPROVE_ENABLED)
@@ -4274,9 +4316,9 @@ def build_ui():
 
                 with gr.Group(visible=False) as input_group:
                     input_mode = gr.Radio(
-                        ["Upscale / img2img"] + (["Reference (Omni)"] if omni_on else []),
+                        ["Upscale / img2img"] + ([EDIT_MODE] if omni_on else []),
                         value="Upscale / img2img", label="Input mode", visible=omni_on,
-                        info="Reference (Omni) = compose from several reference images + prompt.")
+                        info="Edit (references) = FLUX.3 edits from the images of the Edit tab, cited in the prompt as <ref_image_0>, <ref_image_1>...")
                     with gr.Tabs():
                         with gr.Tab("Upscale or img2img"):
                             with gr.Row():
@@ -4412,7 +4454,7 @@ def build_ui():
                                                  elem_id="cz_edit_generate")
                             inpaint_status = gr.Markdown("")
 
-                        with gr.Tab("Reference (Omni)", visible=omni_on):
+                        with gr.Tab(EDIT_MODE, visible=omni_on):
                             # A responsive layout (the columns' min_width = Gradio's
                             # breakpoints): a header in 2 blocks (instructions + button |
                             # the model's status), refs 4 / 2 / 1 per row depending on the
@@ -4428,8 +4470,8 @@ def build_ui():
                                         "<ref_image_0>*. FLUX.3 takes up to 10 references; the CLI "
                                         "and the protocol accept them all, this tab offers 4 slots. "
                                         "Then click **Edit** below (or Generate with Input mode = "
-                                        "Reference (Omni)). Steps/guidance: Settings.*")
-                                    omni_check_btn2 = gr.Button("Check Omni model availability",
+                                        "Edit (references)). Steps/guidance: Settings.*")
+                                    omni_check_btn2 = gr.Button("Check edit model availability",
                                                                 size="sm")
                                 with gr.Column(scale=2, min_width=300):
                                     omni_status2 = gr.Markdown("", elem_classes="cz-omni-status")
@@ -4580,7 +4622,12 @@ def build_ui():
                                                     "real CFG of 3.5.")
                         aspect = gr.Dropdown(list(ASPECT_RATIOS),
                                              value=CONFIG.get("default_aspect_ratio", "1024 x 1024  (1:1)"),
-                                             label="Aspect ratio")
+                                             label="Aspect ratio",
+                                             info="1 MP formats first (about 7 s on a 5090), then "
+                                                  "2K (about 4 MP, 35 to 50 s) and 4K (about 8 MP, "
+                                                  "2 min), all rendered natively by FLUX.3. Width / "
+                                                  "Height below take any custom size, a multiple of "
+                                                  "16, up to 4096 a side.")
                         force_ratio_cb = gr.Radio(
                             ["Off", "Crop to fit", "Extend (outpaint)"],
                             value=("Extend (outpaint)" if (cz_pipeline.FORCE_RATIO and
@@ -4593,9 +4640,12 @@ def build_ui():
                                  "missing bands are outpainted (nothing is lost). "
                                  "Off = keep the input's native ratio.")
                         with gr.Row():
-                            width = gr.Slider(256, 2048, value=int(CONFIG.get("default_width", 1024)),
+                            # Up to 4096 a side: FLUX.3 renders 2K and 4K natively (3840x2160
+                            # measured clean on a 5090 in 113 s); 4096 is diffusers' own cap on
+                            # a reference image, kept as the ceiling for the generation too.
+                            width = gr.Slider(256, 4096, value=int(CONFIG.get("default_width", 1024)),
                                               step=16, label="Width")
-                            height = gr.Slider(256, 2048, value=int(CONFIG.get("default_height", 1024)),
+                            height = gr.Slider(256, 4096, value=int(CONFIG.get("default_height", 1024)),
                                                step=16, label="Height")
                         gen_steps = gr.Slider(2, 40, value=int(CONFIG.get("default_gen_steps", 8)),
                                               step=1, label="Generation steps (txt2img)")
@@ -4883,7 +4933,7 @@ def build_ui():
                                 value=cz_pipeline.EDIT_LORAS_ENABLED,
                                 label="Edit LoRAs",
                                 info="Applies the edit LoRA chosen under the reference images "
-                                     "(Reference (Omni) tab) on the EDIT pipe. Off = the preset "
+                                     "(Edit (references) tab) on the EDIT pipe. Off = the preset "
                                      "is kept but not applied (with/without comparison).")
 
                         with gr.Accordion("\U0001F3B2 Wildcards", open=False):
@@ -4907,8 +4957,8 @@ def build_ui():
                                 wild_create_btn = gr.Button("Create new", size="sm", variant="primary")
                             wild_status = gr.Markdown("")
 
-                        with gr.Accordion("\U0001F5BC️ Omni / Edit (multi-reference)", open=False):
-                            gr.Markdown("*The Reference (Omni) tab is served by the BASE model itself: "
+                        with gr.Accordion("\U0001F5BC️ Edit model (multi-reference)", open=False):
+                            gr.Markdown("*The Edit (references) tab is served by the BASE model itself: "
                                         "FLUX.3 takes a list of reference images (cited as `<ref_image_N>` "
                                         "in the prompt), so multi-reference "
                                         "editing needs no second model and no extra VRAM. Changing the "
@@ -4928,7 +4978,7 @@ def build_ui():
                             omni_model_tb = gr.Dropdown(
                                 choices=_omni_choices, value=_omni_cur or None,
                                 allow_custom_value=True,
-                                label="Omni / Edit model (HF repo or local .gguf/.safetensors)",
+                                label="Edit model (the base model itself on FLUX.3; field kept for the family)",
                                 info="Local edit checkpoints (*edit*, *aio*, *rapid*) from the checkpoints "
                                      "folders + HF repos. Type any other repo/path. Applied on the next "
                                      "edit (no restart, except to reveal the tab the first time).")
@@ -5283,7 +5333,7 @@ def build_ui():
         # gallery would strobe, image and spinner replacing each other all the way.
         btn.click(_with_live_preview(_ui_generate), inputs=_gen_inputs,
                   outputs=_gen_outputs, show_progress_on=[report])
-        # The Reference (Omni) tab's Edit button: same inputs/outputs, forced routing.
+        # The Edit (references) tab's Edit button: same inputs/outputs, forced routing.
         omni_edit_btn.click(_ui_edit_generate, inputs=_gen_inputs, outputs=_gen_outputs)
         if JOB_QUEUE_ENABLED:
             _q_panel = [queue_state, queue_sel, queue_md, queue_add_btn]
