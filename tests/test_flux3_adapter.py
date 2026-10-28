@@ -313,3 +313,21 @@ def test_load_transformer_tells_bfl_fp8r_and_nvfp4_from_a_plain_file(monkeypatch
     assert "quantization_config" not in seen["kw"]
     cz_flux3.load_transformer("repo/x", torch.bfloat16, single_file=fp8r)
     assert isinstance(seen["kw"]["quantization_config"], BFLQuantizationConfig)
+
+
+def test_load_transformer_keeps_the_qk_norms_in_fp32_on_a_single_file():
+    """from_pretrained keeps norm_q / norm_k in float32 (diffusers' _keep_in_fp32_modules);
+    diffusers' from_single_file casts them to bf16. The loader puts them back, so a
+    CivitAI bf16 file renders through the same kernels as the repo (5090, 2026-10-28)."""
+    from safetensors.torch import save_file
+    d = os.path.join(TMP, "fp32_norms")
+    os.makedirs(os.path.join(d, "transformer"), exist_ok=True)
+    m = tiny_transformer()
+    m.save_pretrained(os.path.join(d, "transformer"))
+    single = os.path.join(d, "single.safetensors")
+    save_file({k: v.contiguous() for k, v in m.state_dict().items()}, single)
+    out = cz_flux3.load_transformer(d, torch.bfloat16, single_file=single)
+    norms = {n: p.dtype for n, p in out.named_parameters() if "norm_q" in n or "norm_k" in n}
+    assert norms and set(norms.values()) == {torch.float32}, norms
+    others = {p.dtype for n, p in out.named_parameters() if n not in norms}
+    assert others == {torch.bfloat16}, others

@@ -38,6 +38,7 @@ it can be tested in isolation with tiny random components (tests/test_flux3_adap
 import json
 import logging
 import os
+import sys
 import types
 
 import numpy as np
@@ -744,7 +745,9 @@ def load_transformer(repo, dtype, precision="bf16", single_file=None, token=None
             from diffusers import BFLQuantizationConfig
             kw["quantization_config"] = BFLQuantizationConfig(compute_dtype=dtype)
         model = Flux3Transformer2DModel.from_single_file(single_file, **kw)
-        return _pin_compute_dtype(model, dtype) if "quantization_config" in kw else model
+        if "quantization_config" in kw:
+            return _pin_compute_dtype(model, dtype)
+        return _keep_fp32_norms(model)
     precision = (precision or "bf16").lower()
     if precision in _VARIANT_FILE:
         from diffusers import BFLQuantizationConfig
@@ -761,6 +764,34 @@ def load_transformer(repo, dtype, precision="bf16", single_file=None, token=None
     if token:
         kw["token"] = token
     return Flux3Transformer2DModel.from_pretrained(repo, **kw)
+
+
+def _log(msg):
+    """cz_flux3 imports nothing from the app (the tests load it alone): the same console
+    line as cz_core._log, on stderr, so a degradation is never silent (house rule)."""
+    print(f"[crispz] {msg}", file=sys.stderr, flush=True)
+
+
+def _keep_fp32_norms(model):
+    """from_pretrained keeps the modules of `_keep_in_fp32_modules` (norm_q / norm_k, the
+    QK RMSNorms) in float32 whatever `torch_dtype` says; from_single_file does not
+    (diffusers 0.42.1 ends with a plain `.to(torch_dtype)`, which casts them to bf16 and
+    prints its own warning about it). Measured on the CivitAI bf16 single file (5090,
+    2026-10-28): every step then ran torch.rms_norm with a float32 input against a bf16
+    weight, out of the fused kernel ("Mismatch dtype between input and weight"). Put
+    them back the way the repo load has them, so a single file renders like the repo."""
+    names = tuple(getattr(type(model), "_keep_in_fp32_modules", None) or ())
+    if not names or not isinstance(model, torch.nn.Module):
+        return model
+    n = 0
+    for name, mod in model.named_modules():
+        if name.rsplit(".", 1)[-1] in names:
+            mod.float()
+            n += 1
+    if n:
+        _log(f"single-file transformer: {n} QK norm modules ({', '.join(names)}) put back "
+             f"in float32, as the repo load keeps them")
+    return model
 
 
 def _bfl_quant_of(path):

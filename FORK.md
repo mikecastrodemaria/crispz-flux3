@@ -83,6 +83,32 @@ refusés dès le menu, aucun chargeur ne les reconstruit ; le GGUF Q4_K_M charge
 GGUFQuantizationConfig une fois le dtype de calcul épinglé (diffusers annonce uint8 comme
 dtype d'un modèle GGUF et les blocs modulaires castaient les latents dessus).
 
+Bench `tools/bench_models.py` du 28/10 au soir (5090, bf16, offload none sauf GGUF,
+1024x1024, seed 12345, 3 images par modèle ; "stable" = moyenne des deux dernières) :
+
+| Fichier | Variante | Steps | Chargement | Stable | Pic VRAM |
+|---|---|---|---|---|---|
+| repo distillé (cache HF) | distilled | 4 (voir note) | 15 à 26 s | 1,6 s | 21,2 Go |
+| flux3Klein_klein_bf16.safetensors (11 Go) | distilled | 16 | 131 s | 5,6 s | 21,2 Go |
+| flux3KleinSDINT8.safetensors (comfy-quant) | distilled | 16 | 85 s dont 64 s de dequant | 5,6 s | 21,2 Go |
+| flux3KleinGGUF_v10_q4KM.gguf | distilled | 15 | 45 s | 11,4 s | 8,4 Go |
+| flux3KleinINT8.safetensors (comfy-quant) | base | 50, CFG 3,5 | 84 s dont 64 s de dequant | 33,2 s | 21,2 Go |
+| flux3KleinINT6 / SDINT6 (w6a8_int8) | | | refusés dès le menu | | |
+
+Lecture : les single files bf16 et INT8 déquantifié rendent au même rythme que le repo
+(0,35 s/step) ; le GGUF tourne en offload `model` (forcé par l'app, un GGUF ne va pas sur
+le GPU en none/sequential) à 0,76 s/step pour 8,4 Go de pic ; la colonne chargement est
+le disque (le même transformer : 15 s depuis le cache HF, 131 s en fichier de 11 Go sur
+le F:) plus la minute de dequant des comfy-quant, refaite à chaque chargement (pas de
+cache disque, choix du lot A). Note : ce bench tournait encore avec les profils klein
+(4 steps sur les repos, et l'entrée `-base` chargeait le repo distillé) ; corrigé le
+soir même (variantes lues dans les tenseurs, profils 16 / 50, refus affichés dans le
+plan), le repo base reste à mesurer. Le bench a aussi révélé que `from_single_file`
+(diffusers 0.42.1) casts `norm_q` / `norm_k` en bf16 là où `from_pretrained` les garde
+en float32 (`_keep_in_fp32_modules`) : rms_norm sortait du noyau fusionné à chaque pas
+(avertissement "Mismatch dtype between input and weight") ; cz_flux3 les remet en
+float32 après tout chargement single-file non quantifié.
+
 Les 18,8 Go résidents sont exactement le chiffre BFL pour la H100 en bf16 ; le pic à
 23,7 Go sur la première génération inclut l'échauffement des noyaux. Une 5090 fait donc
 tourner FLUX.3 bf16 entier, sans offload ; fp8r (14,4 Go annoncés) et nvfp4 (13,4 Go)

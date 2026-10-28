@@ -4,6 +4,20 @@ All notable changes to crispz-flux3 (entries below 0.1.0 are crispz-klein's hist
 The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browser tab title.
 
 
+## Unreleased
+
+- `tools/bench_models.py` speaks FLUX.3: the variant column reads the tensor names
+  (distilled / base) instead of a 4B / 9B hidden width, the official repos take their
+  own profile (16 / 1.0, 50 / 3.5) instead of klein's 4 steps, the `-base` repo entry is
+  really loaded as the base repo, the files the app refuses (comfy-quant INT6, FLUX.2,
+  a stray LoRA) are listed as refused in the plan with their reason instead of failing
+  mid-run, and the report's Cache column becomes Format (bf16 / comfy-quant / gguf /
+  bfl fp8r). Found by Mike's first FLUX.3 bench on the 5090 (2026-10-28).
+- A single-file transformer keeps its QK norms (`norm_q` / `norm_k`) in float32, as
+  `from_pretrained` does: diffusers 0.42.1's `from_single_file` cast them to bf16, and
+  every denoising step then ran `rms_norm` out of the fused kernel (the "Mismatch dtype
+  between input and weight" warning of the bench). cz_flux3 puts them back and says so.
+
 ## 0.1.0 (2026-10-28) : crispz-klein ported to FLUX.3 Image Klein
 
 The same studio on black-forest-labs/flux-3-image-klein (5.6B, 16 steps, Kommunity

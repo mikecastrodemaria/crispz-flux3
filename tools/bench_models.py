@@ -15,9 +15,12 @@ have the same cause and are not fixed the same way:
   STEADY STATE the average of the images that follow. The only figure that counts for
                real work, and the only one comparable between models.
 
-Both variants are covered. A 4B checkpoint does not load on a 9B base: so the models are
-grouped by variant and the base repo is switched once per group (a base change is a full
-reload, we do not pay one per file).
+Both FLUX.3 checkpoints are covered: the official repos of the Models menu (distilled,
+base) each loaded as the base repo, then every single file of the checkpoint folders
+(CivitAI bf16, ComfyUI INT8 scaled, GGUF...) as a transformer swap on the first repo of
+the menu. A base-variant FILE needs no base-repo switch: the loader reads its architecture
+from the -base repo by itself (cz_pipeline._load_transformer) and the VAE and the text
+encoder are the same on both checkpoints.
 
 The steps come from EVERY MODEL'S PROFILE (the CivitAI consensus, the undistilled flag,
 then the file name -- the logic of the selection in the UI), not from a single value:
@@ -97,6 +100,8 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 os.chdir(HERE)
 
+import cz_core                     # noqa: E402
+import cz_flux3                    # noqa: E402
 import cz_pipeline as P            # noqa: E402
 import cz_ui as U                  # noqa: E402
 import torch                       # noqa: E402
@@ -106,7 +111,7 @@ RESULTS = os.path.join(OUT, "results.json")
 REPORT = os.path.join(OUT, "REPORT.md")
 
 # Three frankly different images: a face (the skin and the eyes are what betrays a
-# broken merge first), a wide scene (composition, depth), and TEXT (what FLUX.2 can do
+# broken merge first), a wide scene (composition, depth), and TEXT (what FLUX.3 can do
 # and what a failed fusion destroys before anything else).
 PROMPTS = [
     ("portrait",
@@ -125,15 +130,18 @@ PROMPTS = [
 
 
 def _variant(path):
-    """'4B' / '9B' / None for a file; for a repo, what its config says.
-
-    The GGUF has its own reader: without it a 4B GGUF came out with no variant, so
-    paired with the current base -- and a 4B tested on a 9B base always fails."""
+    """'distilled' / 'base' / None for a file (its tensor names: the flow map carries a
+    second timestep embedder, the base model does not); for a repo, what its name or its
+    modular index says. None = the names could not be read (the app then assumes the
+    distilled architecture, and says so)."""
     if os.path.isfile(path):
-        dim = (P._gguf_hidden_dim(path) if P._is_gguf_path(path)
-               else P._flux2_hidden_dim(path))
-        return P._FLUX2_VARIANTS.get(dim)
-    return P._FLUX2_VARIANTS.get(P._base_hidden_dim(path))
+        return P._file_variant(path)
+    return cz_flux3.variant_of(path)
+
+
+# The repo the single files are swapped into: the first of the Models menu (the
+# distilled one in the shipped config). Read ONCE, before the first set_zimage_model.
+START_BASE = (getattr(U, "ZIMAGE_BASE_REPOS", None) or [P.BASE_REPO])[0]
 
 
 def _plan():
@@ -153,55 +161,43 @@ def _plan():
             seen.add(f)
             p = os.path.join(d, f)
             var = _variant(p)
-            why = None
-            if f.lower().endswith(".safetensors"):
-                # A VARIANT refusal does not count: we will switch the base for it.
-                why = P._safetensors_unsupported(p)
-                if why and why == P._flux2_variant_mismatch(P._flux2_hidden_dim(p)):
-                    why = None
-            elif f.lower().endswith(".gguf"):
-                # The same rule for the GGUF. The first version only checked the layout
-                # of the .safetensors: two GGUFs converted by stable-diffusion.cpp were
-                # ATTEMPTED, then refused at load time by the app's guard. We say so from
-                # the plan on, as for any other file the app refuses.
-                why = P._gguf_layout_unsupported(p) or None
-                # ... but as for the .safetensors, a VARIANT refusal does not count:
-                # the bench switches the base per group. Without that line, a 4B base
-                # discarded the three 9B GGUFs from the plan -- checked, 22 models instead
-                # of 25.
-                if why and why == P._flux2_variant_mismatch(P._gguf_hidden_dim(p)):
-                    why = None
+            # The app's own refusal (a FLUX.2 file, a LoRA in the checkpoint folder, a
+            # comfy-quant INT6, a GGUF of another layout...), with its reason: a refusal
+            # is DISPLAYED in the plan, never silently absent. A base-variant file is
+            # not a refusal: the loader reads its architecture from the -base repo.
+            why = P.checkpoint_refusal(p) or None
             items.append((f, p, var, why))
     if ONLY:
         items = [it for it in items if any(s in it[0].lower() for s in ONLY)]
-    # Grouped by variant -> a single base repo switch per group.
-    order = {"4B": 0, "9B": 1, None: 2}
-    items.sort(key=lambda it: (order.get(it[2], 3), it[0].lower()))
+    # The repos first (each one is a full base load), then the files grouped by variant
+    # (a transformer swap on START_BASE), the unreadable ones last.
+    order = {"distilled": 0, "base": 1, None: 2}
+    items.sort(key=lambda it: (os.path.isfile(it[1]), order.get(it[2], 3), it[0].lower()))
     return items
 
 
-def _base_for(variant):
-    """The base repo to set in order to test this variant."""
-    for repo in getattr(U, "ZIMAGE_BASE_REPOS", []) or []:
-        if _variant(repo) == variant:
-            return repo
-    return None
+def _base_for(path):
+    """The base repo to set for this entry: the repo itself, or START_BASE for a file."""
+    return START_BASE if os.path.isfile(path) else path
 
 
-def _dequant_state(path):
-    """'warm' / 'cold' / '-' : the state of the dequantisation cache BEFORE the test.
-
-    Without that column the LOADING line cannot be interpreted: the same file takes a
-    few seconds with its bf16 in the cache and several MINUTES without. Comparing a
-    cached model with one that is not does not measure the models."""
-    if not os.path.isfile(path) or not str(path).lower().endswith(".safetensors"):
+def _format(path):
+    """What the file holds, for the report: 'bf16' (any plain float file), 'gguf',
+    'comfy-quant' (a ComfyUI INT8 / FP8 scaled build, dequantized to bf16 in RAM before
+    loading, see cz_pipeline._load_transformer), 'bfl fp8r' / 'bfl nvfp4', or '-' for a
+    repo (its Precision setting applies)."""
+    if not os.path.isfile(path):
         return "-"
-    # crispz-flux3 has no dequant cache (FLUX.3 ships fp8r / nvfp4 builds): the column
-    # only says whether a file is a ComfyUI scaled quant, handed to diffusers as is.
+    low = str(path).lower()
+    if low.endswith(".gguf"):
+        return "gguf"
     try:
-        return "comfy-quant" if P._safetensors_dequant(path) else "-"
+        q = cz_flux3._bfl_quant_of(path)
+        if q:
+            return f"bfl {q}"
+        return "comfy-quant" if P._safetensors_dequant(path) else "bf16"
     except Exception:
-        return "-"
+        return "?"
 
 
 def _profile(path):
@@ -210,7 +206,10 @@ def _profile(path):
     if FORCE_STEPS:
         return FORCE_STEPS, 1.0, f"forced (--steps {FORCE_STEPS})"
     if not os.path.isfile(path):
-        return 4, 1.0, "base repo default"
+        # The repo's profile (config model_profiles: 16 / 1.0 distilled, 50 / 3.5 base),
+        # the same one the app applies when the repo is picked in the Models menu.
+        st, g = cz_core.profile_for_model(path)
+        return int(st), float(g), "model profile"
     try:
         st, g, why = U._profile_for_checkpoint(path)
         src = ("CivitAI consensus" if "consensus" in (why or "").lower()
@@ -218,7 +217,8 @@ def _profile(path):
                else "file name")
         return int(st), float(g), src
     except Exception:
-        return 4, 1.0, "fallback"
+        st, g = cz_core.profile_for_model(os.path.basename(path))
+        return int(st), float(g), "fallback"
 
 
 def _load(prev):
@@ -249,21 +249,24 @@ def _write_report(rows):
         "- **Bare models**: no LoRA and no LoKr, whatever the current config says.",
         "- **To the first image** = load + first image. READ THIS FIRST: under offload the",
         "  weights stay mapped on disk and the reading slides out of the load and into the",
-        "  first image (measured: 4 s + 173 s for a 9B bf16 on a USB disk). Either of",
-        "  those two columns alone misleads; their sum does not.",
+        "  first image. Either of those two columns alone misleads; their sum does not.",
         "- **s/step** = steady / steps. It overstates the cost of one step under offload: a",
-        "  fixed per-image part (~6.5 s on the 9B, transfers + VAE) is spread into it.",
+        "  fixed per-image part (transfers + VAE) is spread into it.",
+        "- **Format**: what the file holds. `comfy-quant` = a ComfyUI INT8 / FP8 scaled",
+        "  build, dequantized to bf16 in RAM at every load (about a minute for 5 GB on the",
+        "  GPU, no disk cache): that minute sits in the `load` column, not in the images.",
+        "  `gguf` runs quantized, in offload `model` (the app forces it). `bf16` is a plain",
+        "  single file, `-` the repo at its Precision setting.",
         "",
-        "- **Cache**: the state of the dequantisation cache BEFORE the test. `cold` = the",
-        "  load includes the FP8/INT8 -> bf16 conversion (minutes). A `load` column only",
+        "> The `load` column is mostly the DISK: a repo sits in the HF cache, a single",
+        "> file is read whole from its library folder (5090, 2026-10-28: the same",
+        "> transformer took 15 s from the cache and 131 s as an 11 GB file on the F: drive).",
+        "> The OS file cache weighs on it too: the same model measured twice in a row went",
+        "> from 24.1 s to 10.3 s with nothing else touched. Read that column as an order of",
+        "> magnitude, not to the tenth of a second -- `first image` and `steady` are",
+        "> reliable.",
         "",
-        "> The OS file cache weighs on the `load` column too: the same model, measured",
-        "> twice in a row, went from 24.1 s to 10.3 s with nothing else touched. So the",
-        "> first model of the list pays for a cold disk the next ones do not. Read that",
-        "> column as an order of magnitude, not to the tenth of a second -- `first image`",
-        "> and `steady`, on the other hand, are reliable.",
-        "",
-        "| Model | Var. | Steps (source) | Cache | Load | First image | To the first | Steady | s/step | Peak VRAM |",
+        "| Model | Variant | Steps (source) | Format | Load | First image | To the first | Steady | s/step | Peak VRAM |",
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in ok:
@@ -271,7 +274,7 @@ def _write_report(rows):
         per = f"{warm / r['steps']:.2f}" if warm and r.get("steps") else "-"
         lines.append(
             f"| `{r['name']}` | {r.get('variant') or '?'} | {r['steps']} "
-            f"({r['profile_source']}) | {r.get('dequant_cache', '-')} | "
+            f"({r['profile_source']}) | {r.get('format', '-')} | "
             f"{r['load_s']:.1f} s | {r['first_s']:.1f} s | "
             f"**{r['load_s'] + r['first_s']:.0f} s** | "
             + (f"{warm:.1f} s" if warm else "-")
@@ -293,17 +296,17 @@ def _bench_one(name, path, variant):
     """Measures a model. Returns the result row (with 'error' on a failure)."""
     steps, guidance, src = _profile(path)
     row = {"name": name, "variant": variant, "steps": steps, "guidance": guidance,
-           "profile_source": src, "dequant_cache": _dequant_state(path)}
-    # The base of the right variant first (a full reload), then the transformer.
-    base = _base_for(variant) or P.BASE_REPO
+           "profile_source": src, "format": _format(path)}
+    # The repo first (a full reload when it changes), then the transformer swap.
+    base = _base_for(path)
     if base != P.BASE_REPO:
         print(f"    base repo -> {base}")
         P.set_zimage_model(base)
     P.set_zimage_transformer(path if os.path.isfile(path) else None)
     # The model ALONE: no LoRA, no LoKr, no edit set. LORAS is initialised from
     # `default_loras` when the app starts; without that reset the bench would measure the
-    # config of the day and not the model -- a merged LoKr adds ~24 s to every load,
-    # changes every image, and a 9B set on a 4B base would pour its warnings in there.
+    # config of the day and not the model -- a merged LoKr adds ~24 s to every load and
+    # changes every image.
     P.LORAS = []
     P.EDIT_LORAS = []
     # An empty state BEFORE the measurement: otherwise we would be measuring a warm
@@ -353,19 +356,20 @@ def main():
         mark = ("DONE       " if n in done else
                 "REFUSED    " if why else "TO TEST    ")
         st, _g, src = (FORCE_STEPS, 1.0, "forced") if FORCE_STEPS else _profile(p)
-        dq = _dequant_state(p)
+        fmt = _format(p)
         extra = why or (f"{var or '?'}, {st} steps ({src})"
-                        + (f", dequant {dq}" if dq != "-" else ""))
-        # With no variant signature we do not know which base to pair it with: it goes
+                        + (f", {fmt}" if fmt != "-" else ""))
+        # With no variant signature the app assumes the distilled architecture: it goes
         # LAST (the sort puts it at the end) and we say so, rather than throwing it away.
         if not why and var is None:
-            extra += "  [no variant signature -> the current base, may fail]"
+            extra += "  [variant unreadable -> distilled config assumed, may fail]"
         print(f"{mark} {n[:44]:46s} {extra[:96]}")
     print(f"\n{len(todo)} model(s) to test, {len(skipped)} refused, "
           f"{len(done)} already done.")
     if skipped:
         print("A refusal is not a bench failure: those are files the app does not "
-              "load (a stray LoRA, FP4, LyCORIS...), each with its reason.")
+              "load (a FLUX.2 file, a stray LoRA, a comfy-quant INT6...), each with its "
+              "reason.")
     if torch.cuda.is_available():
         free, total = torch.cuda.mem_get_info()
         print(f"GPU: {free / 1024**3:.1f} GB free out of {total / 1024**3:.1f}. "
