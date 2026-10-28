@@ -90,8 +90,8 @@ _FAST_ALIASES = {"off": "Off", "none": "Off", "auto": "Auto (model profile)",
 OMNI_SUPPORTED = True
 # klein serves multi-reference editing from the BASE pipeline (`image` takes a list of
 # PIL images): there is no separate edit repo to configure, so refs are ALWAYS available.
-OMNI_DEFAULT = (os.environ.get("KLEIN_MODEL")
-                or "black-forest-labs/FLUX.2-klein-4B")
+OMNI_DEFAULT = (os.environ.get("FLUX3_MODEL")
+                or "black-forest-labs/flux-3-image-klein")
 
 # klein-4B is step-wise distilled: diffusers ignores `guidance_scale` (measured
 # bit-identical renders from 1.0 to 8.0, tests/test_klein_guidance.py) and the

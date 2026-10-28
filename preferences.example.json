@@ -1,10 +1,10 @@
 {
   "esrgan_dir": "./upscale_models",
-  "klein_model": "black-forest-labs/FLUX.2-klein-4B",
+  "flux3_model": "black-forest-labs/flux-3-image-klein",
   "model": "4x-ClearRealityV1_Soft.safetensors",
   "factor": 2.0,
   "denoise": 0.3,
-  "steps": 12,
+  "steps": 16,
   "prompt": "",
   "seed": -1,
   "tile": 760,

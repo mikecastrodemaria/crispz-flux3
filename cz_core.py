@@ -106,26 +106,50 @@ DEFAULT_OUTPUT_DIR = CONFIG.get("default_output_dir", DEFAULT_OUTPUT_DIR)
 DEFAULT_OUTPUT_FORMAT = CONFIG.get("default_output_format", DEFAULT_OUTPUT_FORMAT)
 
 # The per-model profiles: a substring of the name -> the recommended settings
-# (steps/guidance).
-# klein-4B is distilled: 4 steps, and the guidance has NO effect at all (measured
-# bit-for-bit identical from 1.0 to 8.0, see tests/test_klein_guidance.py). We leave it at
-# 1.0 everywhere so that the UI does not display a value suggesting an active CFG.
+# (steps/guidance). FIRST MATCH WINS, in order, so the longer name comes first:
+# 'flux-3-image-klein-base' (the undistilled checkpoint: 50 steps, CFG 3.5, BFL's model
+# card) BEFORE 'flux-3-image-klein' (the flow map: 16 steps, no CFG, guidance left at 1.0
+# so the UI does not display a value suggesting an active CFG). 'flux-3' / 'flux3' catch
+# the mirrors and community files (unsloth/flux-3-image-klein-GGUF, flux3-xxx.safetensors).
 MODEL_PROFILES = CONFIG.get("model_profiles") or {
-    "klein": {"steps": 4, "guidance": 1.0},
-    "flux-2": {"steps": 4, "guidance": 1.0},
+    "flux-3-image-klein-base": {"steps": 50, "guidance": 3.5},
+    "flux-3-image-klein": {"steps": 16, "guidance": 1.0},
+    "flux-3": {"steps": 16, "guidance": 1.0},
+    "flux3": {"steps": 16, "guidance": 1.0},
 }
-DEFAULT_MODEL_PROFILE = CONFIG.get("default_model_profile") or {"steps": 4, "guidance": 1.0}
+DEFAULT_MODEL_PROFILE = CONFIG.get("default_model_profile") or {"steps": 16, "guidance": 1.0}
+
+# crispz-klein's profile keys, as every config.txt copied from its config-sample.txt
+# carries them. 'klein' is a substring of 'flux-3-image-klein': through such a config the
+# FLUX.3 model would inherit the 4-step FLUX.2 profile and render mush, without a word.
+# Those keys are skipped on a FLUX.3 name, and it is said once.
+_FLUX2_PROFILE_KEYS = ("klein", "flux-2", "flux2")
+_FLUX2_PROFILE_SAID = set()
+
+
+def _is_flux3_name(n):
+    return "flux-3" in n or "flux3" in n
 
 
 def profile_for_model(name):
     """The (steps, guidance) recommended for a model from its name (a substring match in
-    model_profiles), otherwise the default profile."""
-    n = (name or "").lower()
+    model_profiles, first match wins), otherwise the default profile."""
+    n = (name or "").lower().replace("_", "-")
     for key, prof in MODEL_PROFILES.items():
-        if key.lower() in n:
-            return int(prof.get("steps", DEFAULT_MODEL_PROFILE.get("steps", 8))), \
-                float(prof.get("guidance", DEFAULT_MODEL_PROFILE.get("guidance", 0.0)))
-    return int(DEFAULT_MODEL_PROFILE.get("steps", 8)), float(DEFAULT_MODEL_PROFILE.get("guidance", 0.0))
+        k = key.lower()
+        if k not in n:
+            continue
+        if k in _FLUX2_PROFILE_KEYS and _is_flux3_name(n):
+            if key not in _FLUX2_PROFILE_SAID:
+                _FLUX2_PROFILE_SAID.add(key)
+                _log(f"config: model profile '{key}' ({prof.get('steps')} steps) is "
+                     f"crispz-klein's FLUX.2 profile and would also match {name!r}; "
+                     f"skipped for FLUX.3 models. Copy the model_profiles block of "
+                     f"config-sample.txt to silence this.")
+            continue
+        return int(prof.get("steps", DEFAULT_MODEL_PROFILE.get("steps", 16))), \
+            float(prof.get("guidance", DEFAULT_MODEL_PROFILE.get("guidance", 1.0)))
+    return int(DEFAULT_MODEL_PROFILE.get("steps", 16)), float(DEFAULT_MODEL_PROFILE.get("guidance", 1.0))
 
 
 # The Ollama instruction strings (editable in config.txt). The examples from before 1.36

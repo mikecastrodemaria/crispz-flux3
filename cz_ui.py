@@ -145,10 +145,13 @@ ASPECT_RATIOS = {
 _LIVE_PREVIEW_POLL = 0.25
 
 # Fooocus-style Performance -> (gen_steps, guidance) for the loaded model.
+# FLUX.3: the distilled checkpoint is a 16-step flow map (BFL's recipe, no CFG); 8 steps is
+# a draft mode to be measured on the 5090; the undistilled -base checkpoint wants 50 steps
+# and a real CFG of 3.5 (model card). The same three live in config-sample.txt.
 PERFORMANCE = {
-    "Turbo (8 steps)":    (8, 0.0),
-    "Quality (20 steps)": (20, 0.0),
-    "Base CFG (28 steps)": (28, 4.0),
+    "Distilled (16 steps)": (16, 1.0),
+    "Fast (8 steps)":       (8, 1.0),
+    "Base (50 steps, CFG 3.5)": (50, 3.5),
 }
 # Styles. Fooocus format: name -> {"prompt": a template with {prompt} (or None),
 # "negative_prompt": str}. The real library is loaded from styles/*.json (see _load_styles
@@ -561,10 +564,12 @@ def _refresh_models(new_dir):
 # unlike a single-file checkpoint which only swaps the transformer. Both official variants
 # are offered -- the 4B stays the default (it is the one DEFAULT_BASE_REPO points at), the 9B
 # is chosen when a project is worth it.
-# Overridable through config `klein_base_repos`.
+# Overridable through config `flux3_base_repos` (`klein_base_repos` is still read for a
+# config.txt copied from crispz-klein; lot C renames the constants below).
 KLEIN_BASE_4B = "black-forest-labs/FLUX.2-klein-4B"
 KLEIN_BASE_9B = "black-forest-labs/FLUX.2-klein-9B"
-ZIMAGE_BASE_REPOS = [r for r in (CONFIG.get("klein_base_repos")
+ZIMAGE_BASE_REPOS = [r for r in (CONFIG.get("flux3_base_repos")
+                                 or CONFIG.get("klein_base_repos")
                                  or [KLEIN_BASE_4B, KLEIN_BASE_9B])
                      if isinstance(r, str) and r.strip()]
 # A base repo coming from the config/prefs must stay selectable even when it is absent

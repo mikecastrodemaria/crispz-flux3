@@ -1,4 +1,4 @@
-"""The registry of the FLUX.2 Klein EDIT LoRAs.
+"""The registry of the FLUX.3 Image Klein EDIT LoRAs.
 
 The upstream catalogue (crispz-qwen-edit) lists LoRAs trained for
 Qwen-Image-Edit 2509/2511. They are INCOMPATIBLE with FLUX.2 Klein: a different
@@ -29,42 +29,51 @@ import os
 from cz_core import CONFIG, _log, _dbg
 
 # The order = the dropdown's order. inputs = the number of images expected (2 = the input + a reference).
-EDIT_LORA_SPECS = {
-    "Consistence-Edit": {
-        # The author: xiaozhijason / lrzjason (the same one as the upstream catalogue's
-        # Anything2Real). Apache-2.0, rank 128, 200 bf16 tensors (~368 MB), it targets
-        # FLUX.2-klein-4B.
-        # The CivitAI origin: models/1939453 version 2771678 "Flux2 Klein 4B 20260314".
-        # NB: the file MIXES two key dialects (160 PEFT + 40 lora.down/up).
-        # cz_pipeline._load_lora_normalized brings them back to the PEFT dialect before
-        # loading, otherwise peft applies only a part of it SILENTLY (see FORK.md).
-        "repo": "lrzjason/Consistance_Edit_Lora",
-        "weights": "f2k_4B_consist_20260314.safetensors",
-        "adapter_name": "consistence-edit",
-        "prompt": ("Add realistic details to the image. Restore high frequency details "
-                   "from the corrupted image."),
-        "inputs": 1, "base": "klein-4B",
-        "weight": 0.6,          # the author advises 0.5-0.7
-        "local_names": ["f2k_4B_consist_20260314.safetensors",
-                        "consistence_edit_flux2_klein_4b.safetensors"]},
-    "Consistence-Edit 9B": {
-        # The same author, the same repo, the most recent 9B version: CivitAI
-        # models/1939453 "Klein 9B lcs 20260416" (a file from 2026-04-15, the LCS method:
-        # a frame-aware corrupted latent + a loss on the colour statistics). Rank 64, 288
-        # bf16 tensors (~332 MB), hidden dimension 4096 = FLUX.2-klein-9B. That file mixes
-        # two dialects as well (224 lora_A/B + 64 lora.down/up), brought back to the PEFT
-        # dialect by cz_pipeline._load_lora_normalized: 144 modules of the 9B transformer
-        # after the diffusers conversion, no key lost (checked on 2026-09-19).
-        # On the 4B, the variant guard refuses it with a sentence (_lora_unsupported).
-        "repo": "lrzjason/Consistance_Edit_Lora",
-        "weights": "f2k_9B_lcs_consist_20260415.safetensors",
-        "adapter_name": "consistence-edit-9b",
-        "prompt": ("Add realistic details to the image. Restore high frequency details "
-                   "from the corrupted image."),
-        "inputs": 1, "base": "klein-9B",
-        "weight": 0.6,          # the author advises 0.5-0.7
-        "local_names": ["f2k_9B_lcs_consist_20260415.safetensors"]},
-}
+# EMPTY on crispz-flux3 (2026-10-28): no edit-task LoRA has been published for FLUX.3 Image
+# Klein yet (the model is 13 days old). crispz-klein's two Consistence-Edit entries are kept
+# below as a merge reference: they are FLUX.2-klein files (double_blocks keys, 3072 / 4096
+# wide) and cz_pipeline._lora_unsupported refuses them here by family. Declare the first
+# FLUX.3 one in config.txt ('edit_loras') or here as soon as one exists; the download, the
+# local index and the dropdown wake up on their own.
+EDIT_LORA_SPECS = {}
+
+# --- crispz-klein's catalogue (FLUX.2), a MERGE REFERENCE: does not load on FLUX.3.
+# EDIT_LORA_SPECS = {
+#     "Consistence-Edit": {
+#         # The author: xiaozhijason / lrzjason (the same one as the upstream catalogue's
+#         # Anything2Real). Apache-2.0, rank 128, 200 bf16 tensors (~368 MB), it targets
+#         # FLUX.2-klein-4B.
+#         # The CivitAI origin: models/1939453 version 2771678 "Flux2 Klein 4B 20260314".
+#         # NB: the file MIXES two key dialects (160 PEFT + 40 lora.down/up).
+#         # cz_pipeline._load_lora_normalized brings them back to the PEFT dialect before
+#         # loading, otherwise peft applies only a part of it SILENTLY (see FORK.md).
+#         "repo": "lrzjason/Consistance_Edit_Lora",
+#         "weights": "f2k_4B_consist_20260314.safetensors",
+#         "adapter_name": "consistence-edit",
+#         "prompt": ("Add realistic details to the image. Restore high frequency details "
+#                    "from the corrupted image."),
+#         "inputs": 1, "base": "klein-4B",
+#         "weight": 0.6,          # the author advises 0.5-0.7
+#         "local_names": ["f2k_4B_consist_20260314.safetensors",
+#                         "consistence_edit_flux2_klein_4b.safetensors"]},
+#     "Consistence-Edit 9B": {
+#         # The same author, the same repo, the most recent 9B version: CivitAI
+#         # models/1939453 "Klein 9B lcs 20260416" (a file from 2026-04-15, the LCS method:
+#         # a frame-aware corrupted latent + a loss on the colour statistics). Rank 64, 288
+#         # bf16 tensors (~332 MB), hidden dimension 4096 = FLUX.2-klein-9B. That file mixes
+#         # two dialects as well (224 lora_A/B + 64 lora.down/up), brought back to the PEFT
+#         # dialect by cz_pipeline._load_lora_normalized: 144 modules of the 9B transformer
+#         # after the diffusers conversion, no key lost (checked on 2026-09-19).
+#         # On the 4B, the variant guard refuses it with a sentence (_lora_unsupported).
+#         "repo": "lrzjason/Consistance_Edit_Lora",
+#         "weights": "f2k_9B_lcs_consist_20260415.safetensors",
+#         "adapter_name": "consistence-edit-9b",
+#         "prompt": ("Add realistic details to the image. Restore high frequency details "
+#                    "from the corrupted image."),
+#         "inputs": 1, "base": "klein-9B",
+#         "weight": 0.6,          # the author advises 0.5-0.7
+#         "local_names": ["f2k_9B_lcs_consist_20260415.safetensors"]},
+# }
 
 # --- The upstream Qwen-Image-Edit catalogue, kept as a MERGE REFERENCE.
 # --- (none of these entries loads on FLUX.2: a different architecture and keys)

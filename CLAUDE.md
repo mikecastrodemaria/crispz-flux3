@@ -102,7 +102,15 @@ FLUX.2-klein-4B : l'ancien tri 4B/9B laisserait passer un fichier FLUX.2.
 Piège diffusers : `ModularPipeline.blocks` renvoie une **copie** ; les vrais blocs sont
 dans `mp._blocks` (c'est là qu'on rattache `hook.owner`).
 
-## 5. État au 28/10/2026 (branche `wip/flux3-engine`, lot A livré)
+## 5. État au 28/10/2026 (branche `wip/flux3-engine`, lots A et B livrés)
+
+Fait au lot B : profils `flux-3-image-klein-base` (50 / 3,5) avant `flux-3-image-klein`
+(16 / 1,0) dans `cz_core` et `config-sample.txt`, garde contre la clé `klein` d'un
+config.txt hérité (sautée sur un nom FLUX.3, dit une fois), presets Distilled / Fast /
+Base, clés `flux3_model` / `flux3_transformer` / `flux3_precision` / `flux3_base_repos`
+(cz_ui lit `flux3_base_repos` puis `klein_base_repos`), `preferences.example.json`,
+catalogue d'edit LoRAs vidé avec un commentaire daté, `cz_protocol.OMNI_DEFAULT` sur
+FLUX.3. Test : `tests/test_flux3_profiles.py` (4).
 
 Fait au lot A (voir §6 pour le détail) : `get_pipe` rend la base pour img2img/inpaint,
 sampler Euler imposé et dit une fois, `Flux3Pipe.register_modules`, GGUF via
@@ -124,8 +132,11 @@ Fait avant (commit 8bd62a6) :
   des checkpoints par famille (`_flux3_file_refusal`, `list_checkpoints`,
   `checkpoint_refusal`), refus des LoRAs FLUX.2 (`_lora_unsupported`).
 
-Suite de tests mesurée après le lot A : **498 passent, 33 échouent** (avant le lot A :
-491 / 24). Les 33 échecs testent tous le comportement FLUX.2 (4B/9B par largeur, dequant
+Suite de tests mesurée après le lot B : **495 passent, 40 échouent** (après le lot A :
+498 / 33 ; avant : 491 / 24). Les 7 échecs ajoutés par le lot B attendent tous 4 steps ou
+le catalogue Consistence-Edit de FLUX.2 : `test_detailer_steps` (2),
+`test_edit_lora_presets` (3), `test_undistilled_guidance::..._gets_the_right_profile`,
+`test_preset_model_switch::test_the_refusal_leads_with_the_action`. Les 33 échecs testent tous le comportement FLUX.2 (4B/9B par largeur, dequant
 FP8 ComfyUI, encodeur trim 9B, libellés de menu "4B"/"9B") ; les 9 nouveaux viennent de la
 garde par famille et des nouveaux messages du lot A, et sont attendus :
 
@@ -184,7 +195,7 @@ Acceptation : `tests/test_flux3_adapter.py` vert ; un nouveau test
 `cz_pipeline._BASE_PIPE`, fait passer `generate`, `generate_omni`, `process_one`
 (refine), `inpaint_run` et `outpaint` sans exception et avec la bonne taille de sortie.
 
-### Lot B : profils, presets et configuration
+### Lot B : profils, presets et configuration (FAIT le 28/10/2026)
 
 1. **Piège** : `cz_core.profile_for_model()` matche par sous-chaîne et le profil `klein`
    (4 steps) matcherait `flux-3-image-klein`. Remplacer dans `config-sample.txt` et les
