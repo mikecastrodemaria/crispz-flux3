@@ -147,7 +147,7 @@ def test_validate_refs_capped_at_max():
     d = tempfile.mkdtemp(prefix="cz_refs_")
     try:
         paths = []
-        for i in range(6):
+        for i in range(cp.MAX_REFS + 2):          # FLUX.3: 10, two too many
             p = os.path.join(d, f"r{i}.png")
             Image.new("RGB", (8, 8)).save(p)
             paths.append(p)

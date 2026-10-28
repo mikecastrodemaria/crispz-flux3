@@ -32,7 +32,8 @@ When an Omni model is configured (zimage_omni_model), generation goes through
 generate_omni (multi-reference, character consistency); otherwise refs are
 dropped WITH a warning and supports.refs announces it upfront. A ref missing
 on disk is an error (code 2), never a silently degraded generation. At most
-4 refs (Omni UI limit), extras are cut with a warning.
+10 refs (FLUX.3's <ref_image_0> ... <ref_image_9>; the UI offers 4 slots, the protocol
+takes the full 10), extras are cut with a warning.
 """
 
 import os
@@ -71,7 +72,7 @@ SPEC_FIELDS = ("protocol", "op", "prompt", "negative", "width", "height",
 
 _DEF_URL = "http://127.0.0.1:7860"
 
-MAX_REFS = 4                      # Omni pipeline limit (same as the UI)
+MAX_REFS = 10                     # FLUX.3 references <ref_image_0>..<ref_image_9> (the UI shows 4 slots)
 
 # spec.fast (op edit) -> the mode name on the cz_pipeline.set_edit_speed side
 # klein has no speed preset: the model is already distilled to 4 steps and no FLUX.2

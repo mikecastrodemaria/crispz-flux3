@@ -92,3 +92,30 @@ def test_the_ui_presets_mirror_the_sample_and_the_edit_catalogue_is_empty():
     import cz_ui
     sample = {k: (int(v[0]), float(v[1])) for k, v in cfg["performance_presets"].items()}
     assert set(sample) >= set(cz_ui.PERFORMANCE) or cz_ui.PERFORMANCE == sample
+
+
+def test_set_precision_changes_the_cache_key_and_is_said(monkeypatch):
+    import cz_pipeline as P
+    lines = []
+    monkeypatch.setattr(P, "_log", lambda m: lines.append(str(m)))
+    monkeypatch.setattr(P, "PRECISION", "bf16")
+    monkeypatch.setattr(P, "ZIMAGE_TRANSFORMER", None)
+    assert P.set_precision("fp8r") == "fp8r" and P.PRECISION == "fp8r"
+    assert any("transformer swap" in m for m in lines)
+    assert P.set_precision("fp8r") == "fp8r"                  # unchanged: nothing said
+    assert sum("precision" in m for m in lines) == 1
+    assert P.set_precision("int2") == "bf16"                  # unknown -> the safe build, said
+    assert any("unknown" in m for m in lines)
+    # with a single-file transformer picked, the choice is noted but announced as pending
+    monkeypatch.setattr(P, "ZIMAGE_TRANSFORMER", "C:/m/x.safetensors")
+    assert P.set_precision("nvfp4") == "nvfp4"
+    assert any("single-file transformer" in m for m in lines)
+    # the UI handler persists and reports, without touching the pipeline here
+    import cz_ui
+    saved = {}
+    monkeypatch.setattr(cz_ui, "_save_prefs_keys", lambda d: saved.update(d))
+    monkeypatch.setattr(P, "ZIMAGE_TRANSFORMER", None)
+    msg = cz_ui._ui_set_precision("bf16")
+    assert saved == {"flux3_precision": "bf16"} and "bf16" in msg
+    assert cz_ui._variant_of_repo("black-forest-labs/flux-3-image-klein-base") == "Base"
+    assert cz_ui._variant_of_repo("black-forest-labs/flux-3-image-klein") == "Distilled"

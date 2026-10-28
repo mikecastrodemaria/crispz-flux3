@@ -559,18 +559,19 @@ def _refresh_models(new_dir):
     return gr.update(choices=models, value=value), f"{len(models)} model(s) found in {cz_esrgan.ESRGAN_DIR}"
 
 
-# The official FLUX.2 Klein base repos, offered directly in the "Klein checkpoint"
-# dropdown: choosing a base repo = a COMPLETE swap (transformer + VAE + Qwen3 encoder),
-# unlike a single-file checkpoint which only swaps the transformer. Both official variants
-# are offered -- the 4B stays the default (it is the one DEFAULT_BASE_REPO points at), the 9B
-# is chosen when a project is worth it.
+# The official FLUX.3 Image Klein base repos, offered directly in the "FLUX.3 checkpoint"
+# dropdown: choosing a base repo = a COMPLETE swap (transformer + VAE + Qwen3-VL encoder),
+# unlike a single-file checkpoint which only swaps the transformer. Both official
+# checkpoints are offered: the distilled one stays the default (16 steps, the one
+# DEFAULT_BASE_REPO points at), the base one when a project wants a real CFG.
 # Overridable through config `flux3_base_repos` (`klein_base_repos` is still read for a
-# config.txt copied from crispz-klein; lot C renames the constants below).
-KLEIN_BASE_4B = "black-forest-labs/FLUX.2-klein-4B"
-KLEIN_BASE_9B = "black-forest-labs/FLUX.2-klein-9B"
+# config.txt copied from crispz-klein).
+import cz_flux3
+FLUX3_DISTILLED = cz_flux3.FLUX3_DISTILLED
+FLUX3_BASE = cz_flux3.FLUX3_BASE
 ZIMAGE_BASE_REPOS = [r for r in (CONFIG.get("flux3_base_repos")
                                  or CONFIG.get("klein_base_repos")
-                                 or [KLEIN_BASE_4B, KLEIN_BASE_9B])
+                                 or [FLUX3_DISTILLED, FLUX3_BASE])
                      if isinstance(r, str) and r.strip()]
 # A base repo coming from the config/prefs must stay selectable even when it is absent
 # from the list: otherwise the dropdown shows one model while the pipeline uses another (and
@@ -580,20 +581,24 @@ if cz_pipeline.BASE_REPO and cz_pipeline.BASE_REPO not in ZIMAGE_BASE_REPOS:
 
 # What you need to know BEFORE launching a run on a base repo, not after 20 GB of
 # download: licence, access, VRAM. Shown on selection.
+_KOMMUNITY = ("**FLUX Kommunity License**: free, commercial use included, under 5 M USD of "
+              "yearly revenue (above that, a licence from BFL). The repo is **gated**: accept "
+              "the licence at https://huggingface.co/{repo} with your HF account, then set a "
+              "READ token (config `hf_token` or env HF_TOKEN). VRAM, BFL's figures to be "
+              "measured here: about 19 GB all-in in bf16, 14.4 in fp8r, 13.5 in nvfp4 "
+              "(the Precision selector); below that, set CPU offload to `model`.")
 BASE_REPO_NOTES = {
-    KLEIN_BASE_9B: (
-        f"⚠ **FLUX Non-Commercial License** (the 4B is Apache-2.0), and the repo is "
-        f"**gated**: accept the licence at https://huggingface.co/{KLEIN_BASE_9B} "
-        f"with your HF account, then set a READ token (config `hf_token`). It also "
-        f"needs ~29 GB of VRAM — below that, set CPU offload to `model`."),
+    FLUX3_DISTILLED: ("Distilled checkpoint: a 16-step flow map, no CFG (the guidance slider "
+                      "and the negative prompt are inert). " + _KOMMUNITY.format(repo=FLUX3_DISTILLED)),
+    FLUX3_BASE: ("Base checkpoint: undistilled, about 50 steps with a REAL CFG (3.5 advised) "
+                 "and a working negative prompt; three times slower per image. "
+                 + _KOMMUNITY.format(repo=FLUX3_BASE)),
 }
-# The default Performance preset for each official base repo: Turbo (distilled,
-# guidance 0) vs Base (needs a real CFG + more steps). The base repo's name
-# ("...klein-4B") does not contain "base", so the mapping is explicit rather than done by
-# substring. steps/guidance are then taken from the preset itself (a single source).
-# No preset is forced for the klein base repo: profile_for_model() decides
-# (the "klein" profile = 4 steps / guidance 1.0). NB: do NOT put a preset name here that
-# does not exist in performance_presets -- _apply_checkpoint would ignore it silently.
+# The default Performance preset for each official base repo. Empty: profile_for_model()
+# decides from the name (flux-3-image-klein-base -> 50 / 3.5, flux-3-image-klein -> 16 /
+# 1.0, see cz_core) and _perf_update picks the matching preset. NB: do NOT put a preset
+# name here that does not exist in performance_presets -- _apply_checkpoint would ignore
+# it silently.
 ZIMAGE_BASE_PERFORMANCE = {}
 
 
@@ -707,19 +712,20 @@ def _profile_for_checkpoint(path):
         preset, st, g = _undistilled_profile()
         if preset:
             return st, g, (f" Its CivitAI page calls it **undistilled**, so the "
-                           f"distilled profile (4 steps, no CFG) would render mush: "
+                           f"distilled profile (16 steps, no CFG) would render mush: "
                            f"applied _{preset}_ instead.")
-    # 2b. The FILE NAME of the official undistilled release: BFL publishes it as
-    #     'flux-2-klein-base-4b' / 'FLUX.2-klein-base-9B'. An official file = no CivitAI
-    #     page, so no sidecar: profile_for_model saw "klein" in it -> 4 steps without CFG,
-    #     and the image stopped halfway (the 2026-09-10 bench: sharpness 572 on the scene,
-    #     against 971 for the distilled base at the same settings).
+    # 2b. The FILE NAME of the official undistilled release ('flux-3-image-klein-base',
+    #     and crispz-klein's 'flux-2-klein-base-4b' in a shared library). An official file
+    #     = no CivitAI page, so no sidecar. Kept from crispz-klein, where the distilled
+    #     profile left such a file unfinished (the 2026-09-10 bench: sharpness 572 on the
+    #     scene, against 971 for the distilled base at the same settings); here the
+    #     cz_core profile already knows '-base', this is the belt to its braces.
     import re
     if re.search(r"klein[-_. ]?base|base[-_. ]?(?:4|9)b", base.lower()):
         preset, st, g = _undistilled_profile()
         if preset:
             return st, g, (f" The file name says **klein-base**: the undistilled release, "
-                           f"which the distilled profile (4 steps, no CFG) leaves "
+                           f"which the distilled profile (16 steps, no CFG) leaves "
                            f"unfinished: applied _{preset}_ instead.")
     # 3. Nothing known: the file-name profile, as before.
     st, g = profile_for_model(base)
@@ -786,12 +792,12 @@ def _ui_refresh_text_encoders():
 
 
 def _ckpt_choices():
-    """What the 'Klein checkpoint' menu offers, under the 4B/9B selector: the current
-    base repo on its own line, then the single-file checkpoints that fit it, each
-    carrying its variant, its size and its format.
+    """What the 'FLUX.3 checkpoint' menu offers, under the Distilled/Base selector: the
+    current base repo on its own line, then the single-file FLUX.3 checkpoints, each
+    carrying its family, its size and its format.
 
-    The OTHER variant's repo is NOT here -- the selector is what switches family. Having
-    both in the menu is what made one entry mean a complete base swap and the next a mere
+    The OTHER official repo is NOT here -- the selector is what switches it. Having both
+    in the menu is what made one entry mean a complete base swap and the next a mere
     transformer override. The VALUES are unchanged (a repo id, or a path relative to the
     folder), so presets, queued jobs and image metadata keep working."""
     repo = cz_pipeline.BASE_REPO or ZIMAGE_BASE_REPOS[0]
@@ -799,24 +805,51 @@ def _ckpt_choices():
             + cz_pipeline.checkpoint_choices())
 
 
+VARIANT_CHOICES = ("Distilled", "Base")
+
+
 def _variant_of_repo(repo=None):
-    """'4B' / '9B' for the selector, from the base repo in use."""
-    return "9B" if str(repo or cz_pipeline.BASE_REPO or "").endswith("9B") else "4B"
+    """'Distilled' / 'Base' for the selector, from the base repo in use."""
+    return "Base" if cz_pipeline.is_base_variant(repo or cz_pipeline.BASE_REPO) else "Distilled"
 
 
 def _apply_variant(v):
-    """The 4B/9B selector: the same complete base swap that picking the repo in the menu
-    used to do -- transformer, VAE and text encoder all change, and the list of loadable
-    single-file checkpoints with them. Already on that family -> nothing moves, so
-    clicking the current one never costs a reload."""
-    repo = KLEIN_BASE_9B if str(v).upper().startswith("9") else KLEIN_BASE_4B
+    """The Distilled/Base selector: the same complete base swap that picking the repo in
+    the menu used to do -- transformer, VAE and text encoder all change. Already on that
+    checkpoint -> nothing moves, so clicking the current one never costs a reload."""
+    repo = FLUX3_BASE if str(v).strip().lower().startswith("base") else FLUX3_DISTILLED
     if repo == cz_pipeline.BASE_REPO:
         return (gr.update(),) * 6
     return _apply_checkpoint(repo)
 
 
+def _ui_set_precision(p):
+    """The Precision selector: bf16 / fp8r / nvfp4 of the official transformer. Persisted
+    in the preferences; the swap happens on the next run (the cache key carries it)."""
+    before = cz_pipeline.PRECISION
+    now = cz_pipeline.set_precision(p)
+    try:
+        _save_prefs_keys({"flux3_precision": now})
+    except Exception as e:
+        _dbg(f"precision not persisted: {e}")
+    if now == before:
+        return f"Precision: **{now}** (unchanged)."
+    if cz_pipeline.ZIMAGE_TRANSFORMER:
+        return (f"Precision: **{now}**, noted. The single-file transformer "
+                f"`{os.path.basename(cz_pipeline.ZIMAGE_TRANSFORMER)}` is in use and carries its "
+                f"own precision; this applies once you pick the base repo again.")
+    extra = ""
+    if now == "nvfp4":
+        extra = (" nvfp4 needs an RTX 50xx (Blackwell) and the `flashinfer` package; "
+                 "elsewhere the load fails with its reason.")
+    elif now == "fp8r":
+        extra = " fp8r is fast from compute capability 8.9 (RTX 40xx/50xx); it still runs below."
+    return (f"Precision: **{now}**. The transformer alone is reloaded on the next run "
+            f"(VAE and text encoder stay), downloaded on first use.{extra}")
+
+
 def _apply_checkpoint(name):
-    """Selects either an official FLUX.2 Klein base repo (a complete BASE_REPO swap), or a
+    """Selects either an official FLUX.3 base repo (a complete BASE_REPO swap), or a
     local single-file checkpoint (a transformer override, with the VAE/encoder from the base
     repo). Also adjusts steps/guidance AND the Performance preset according to the model's
     profile.
@@ -854,7 +887,7 @@ def _apply_checkpoint(name):
         except Exception as e:
             saved = f" (could not persist the choice: {e})"
         note = BASE_REPO_NOTES.get(name)
-        return (f"Klein base: **{name}** -> {perf or 'auto'} (steps={st}, CFG={g}, full "
+        return (f"FLUX.3 base: **{name}** -> {perf or 'auto'} (steps={st}, CFG={g}, full "
                 f"reload on next run — transformer, VAE and text encoder all change). "
                 f"{len(cks)} single-file checkpoint(s) fit this base.{saved}"
                 + (f"\n\n{note}" if note else ""),
@@ -871,7 +904,7 @@ def _apply_checkpoint(name):
     path = resolve_checkpoint(name)
     set_zimage_transformer(path)
     st, g, why = _profile_for_checkpoint(path)
-    return (f"Klein transformer: {os.path.basename(path)} -> auto steps={st}, CFG={g} "
+    return (f"FLUX.3 transformer: {os.path.basename(path)} -> auto steps={st}, CFG={g} "
             f"(transformer swap on next run — VAE + text encoder stay loaded).{why}",
             gr.update(value=st), gr.update(value=g), _perf_update(st, g),
             gr.update(), gr.update())
@@ -881,8 +914,8 @@ def _ui_civitai_reco(name, progress=gr.Progress()):
     """Applies the CivitAI community settings to the current model (the consensus of the
     example images' 'meta': steps/CFG by median, the sampler by majority). Fetches the
     civitai.json sidecar when it is missing (with progress: hashing a 12 GB checkpoint with
-    no cache can take several minutes on a HDD). Samplers with no FLUX.2 equivalent
-    (DPM++...) are ignored: the current sampler is kept and only steps/CFG are applied."""
+    no cache can take several minutes on a HDD). The sampler is never applied on FLUX.3
+    (Euler is the model's own schedule): only steps/CFG are."""
     import cz_civitai
     _noop = (gr.update(), gr.update(), gr.update(), gr.update())
     if not name or name in ZIMAGE_BASE_REPOS:
@@ -917,14 +950,12 @@ def _ui_civitai_reco(name, progress=gr.Progress()):
         parts.append(f"CFG={reco['guidance']}")
     if reco.get("sampler"):
         parts.append(f"sampler={reco['sampler']}"
-                     + ("" if samp else " → no FLUX.2 equivalent, kept current"))
+                     + " (not applied: FLUX.3 runs its native Euler schedule)")
     if reco.get("size"):
         parts.append(f"size={reco['size']} (info only)")
     msg = (f"📊 CivitAI consensus ({reco.get('n', '?')} community image(s)): "
            + ", ".join(parts) if parts else "CivitAI page has no usable settings.")
-    return (msg, st_u, g_u,
-            gr.update(value=samp) if samp else gr.update(),
-            gr.update(value=sched) if sched else gr.update())
+    return (msg, st_u, g_u, gr.update(), gr.update())
 
 
 def _apply_transformer_repo(repo):
@@ -932,10 +963,10 @@ def _apply_transformer_repo(repo):
     Adjusts steps/guidance AND the Performance preset according to the model's profile.
     An EMPTY field = a no-op: nothing is reset (otherwise this button would erase the
     checkpoint chosen just above). To go back to the pure base repo, pick an official repo
-    in 'Klein checkpoint'."""
+    in 'FLUX.3 checkpoint'."""
     repo = (repo or "").strip()
     if not repo:
-        return ("Transformer override is empty — no change. Pick a model in 'Qwen "
+        return ("Transformer override is empty, no change. Pick a model in 'FLUX.3 "
                 "checkpoint' above (that also clears any override).",
                 gr.update(), gr.update(), gr.update())
     why = checkpoint_refusal(repo)      # None for an HF repo / diffusers folder
@@ -1242,13 +1273,11 @@ def _klein_base_prefixes():
     load on a 9B base, cz_pipeline refuses it with its reason. The variant is only used to
     ORDER and to filter on request; reading it must never break a search, hence the except.
     """
-    fam = cz_civitai._norm_base("FLUX.2-klein")
-    cur = ""
-    try:
-        cur = cz_civitai._norm_base(cz_pipeline._variant_name(cz_pipeline._base_hidden_dim()))
-    except Exception as e:
-        _dbg(f"civitai search: current variant unknown ({e})")
-    return fam, (cur if cur.startswith(fam) else "")
+    # FLUX.3 has one width: the family IS the current variant. CivitAI's label for the
+    # family is not known yet (the model is days old); 'FLUX.3' as a prefix is the best
+    # guess until a real sidecar says otherwise.
+    fam = cz_civitai._norm_base("FLUX.3")
+    return fam, fam
 
 
 def _ui_civitai_lora_search(query, klein_only):
@@ -1274,7 +1303,7 @@ def _ui_civitai_lora_search(query, klein_only):
         cands = [c for c in cands
                  if cz_civitai._norm_base(c.get("baseModel")).startswith(fam)]
     if not cands:
-        hint = (" with a FLUX.2 Klein base — untick 'Klein only' to see the other bases "
+        hint = (" with a FLUX.3 base, untick 'FLUX.3 only' to see the other bases "
                 "(they will not load here)." if klein_only else
                 ". Check the spelling, or the model may not be on CivitAI.")
         return (gr.update(value=q), gr.update(choices=[], value=None), {},
@@ -3840,7 +3869,7 @@ def _preset_switch_base(data):
         return ""
     if want not in ZIMAGE_BASE_REPOS:
         return (f"\n\n⚠ This preset was saved on the base repo `{want}`, which is not "
-                f"offered here (config `klein_base_repos`). The base was left on "
+                f"offered here (config `flux3_base_repos`). The base was left on "
                 f"`{cz_pipeline.BASE_REPO}`.")
     was = cz_pipeline.BASE_REPO
     set_zimage_transformer("")
@@ -3874,7 +3903,7 @@ def _preset_ckpt_refusal(ckpt, data):
     # actionable: we do not merely say that it is old.
     target = want or cz_pipeline._variant_repo(dim)
     if target and target in ZIMAGE_BASE_REPOS and target != cz_pipeline.BASE_REPO:
-        action = (f"**Pick `{target}` in the _Klein checkpoint_ dropdown above, then "
+        action = (f"**Pick `{target}` in the _FLUX.3 checkpoint_ dropdown above, then "
                   f"load this preset again.**")
     else:
         action = "**Fix the checkpoint folder(s), then load this preset again.**"
@@ -4121,7 +4150,7 @@ def build_ui():
                 with gr.Row(equal_height=True):
                     negative = gr.Textbox(show_label=False, value=CONFIG.get("default_negative_prompt", ""),
                                           elem_id="cz_neg", lines=1, max_lines=6, container=False, scale=4,
-                                          placeholder="Negative prompt - INERT on FLUX.2 Klein (distilled: no CFG, no negative_prompt)")
+                                          placeholder="Negative prompt - inert on the distilled FLUX.3 checkpoint (no CFG); works on flux-3-image-klein-base")
                     stop_btn = gr.Button("Stop", variant="stop", scale=1, min_width=150)
 
                 with gr.Row():
@@ -4301,7 +4330,7 @@ def build_ui():
                         with gr.Tab("Vision Mix"):
                             gr.Markdown("*Vision Mix: a vision model looks at your reference images "
                                         "and an LLM blends them into ONE text prompt (e.g. a person + "
-                                        "an outfit + a setting), then FLUX.2 Klein generates from it. "
+                                        "an outfit + a setting), then FLUX.3 generates from it. "
                                         "Needs Ollama with a vision model (Advanced > Prompt AI). "
                                         "It mixes ideas/style, not exact pixels.*")
                             with gr.Row():
@@ -4382,12 +4411,14 @@ def build_ui():
                             with gr.Row(elem_classes="cz-omni-head", equal_height=False):
                                 with gr.Column(scale=3, min_width=340):
                                     gr.Markdown(
-                                        "*Edit an image from an instruction: put it in **Ref 1** "
-                                        "(Ref 2 = light/style reference for 2-image presets, up to "
-                                        "4 refs to compose), pick an Edit LoRA preset if you want, "
-                                        "write the instruction in the prompt, then click **Edit** "
-                                        "below (or Generate with Input mode = Reference (Omni)). "
-                                        "Steps/guidance: Settings, unless Edit speed is on.*")
+                                        "*Edit an image from an instruction: put it in **Ref 1**, "
+                                        "add up to 3 more references, and cite them in the prompt "
+                                        "as `<ref_image_0>` (Ref 1), `<ref_image_1>` (Ref 2)... "
+                                        "e.g. *put the jacket of <ref_image_1> on the person in "
+                                        "<ref_image_0>*. FLUX.3 takes up to 10 references; the CLI "
+                                        "and the protocol accept them all, this tab offers 4 slots. "
+                                        "Then click **Edit** below (or Generate with Input mode = "
+                                        "Reference (Omni)). Steps/guidance: Settings.*")
                                     omni_check_btn2 = gr.Button("Check Omni model availability",
                                                                 size="sm")
                                 with gr.Column(scale=2, min_width=300):
@@ -4411,9 +4442,9 @@ def build_ui():
                                         choices=_edit_lora_choices(), value="None",
                                         label="Edit LoRA presets",
                                         info="✓ = on disk, ⬇ = fetched from Hugging Face on first "
-                                             "use. Only LoRAs verified to LOAD on FLUX.2 Klein are "
-                                             "listed; each targets one model (4B or 9B, in its "
-                                             "name or its note). No trigger word: describe the edit.")
+                                             "use. Empty until an edit-task LoRA is published for "
+                                             "FLUX.3 (none yet, 2026-10-28); declare one in config "
+                                             "`edit_loras`. No trigger word: describe the edit.")
                                     with gr.Row():
                                         edit_lora_prompt_btn = gr.Button("Use example prompt", size="sm")
                                         edit_lora_refresh_btn = gr.Button("Refresh presets", size="sm")
@@ -4444,8 +4475,8 @@ def build_ui():
                                         value=_initial_edit_speed(),
                                         label="Edit speed",
                                         info="Stacks an acceleration LoRA and forces its step "
-                                             "count. No FLUX.2 Klein one exists yet, and klein "
-                                             "is already distilled to 4 steps - so this is "
+                                             "count. No FLUX.3 one exists yet, and the distilled "
+                                             "checkpoint already runs 16 steps - so this is "
                                              "hidden until one ships.")
                                 with gr.Column(scale=1, min_width=260):
                                     edit_speed_status = gr.Markdown("", elem_classes="cz-omni-status")
@@ -4533,11 +4564,10 @@ def build_ui():
                                                # outside choices is refused by the frontend.
                                                value=_valid_performance(CONFIG.get("default_performance")),
                                                label="Performance",
-                                               info="Sets steps and CFG. On the klein base repo the "
-                                                    "guidance is inert (distilled, measured bit-identical "
-                                                    "1.0 to 8.0). On a single-file checkpoint it is NOT: "
-                                                    "some community builds are undistilled and need a real "
-                                                    "CFG and many more steps.")
+                                               info="Sets steps and CFG. Distilled = the 16-step flow map "
+                                                    "(guidance inert). Fast = 8 steps, a draft. Base = the "
+                                                    "flux-3-image-klein-base checkpoint, 50 steps with a "
+                                                    "real CFG of 3.5.")
                         aspect = gr.Dropdown(list(ASPECT_RATIOS),
                                              value=CONFIG.get("default_aspect_ratio", "1024 x 1024  (1:1)"),
                                              label="Aspect ratio")
@@ -4562,23 +4592,25 @@ def build_ui():
                         with gr.Row():
                             guidance = gr.Slider(0.0, 8.0, value=float(CONFIG.get("default_guidance", 0.0)),
                                                  step=0.5, label="CFG guidance", scale=2,
-                                                 info="NO EFFECT on klein: the model is step-wise distilled, so "
-                                                      "diffusers ignores guidance_scale. Kept for API compat.")
+                                                 info="Inert on the distilled checkpoint (a flow map has no "
+                                                      "unconditional branch). A real CFG on flux-3-image-klein-base "
+                                                      "(3.5 advised).")
+                            # FLUX.3 runs its own FlowMatch Euler schedule (constant shift
+                            # 6.93); the distilled checkpoint is a flow map that is told the
+                            # next timestep at every step, so another sampler or a remapped
+                            # schedule breaks it. The two menus stay (presets, XYZ, the CLI
+                            # and metadata read them) but are greyed out, and cz_pipeline
+                            # ignores any other value with a log line.
                             sampler_dd = gr.Dropdown(
-                                list(SAMPLER_CHOICES),
-                                value=(CONFIG.get("default_sampler") or "euler").strip().lower()
-                                if (CONFIG.get("default_sampler") or "euler").strip().lower() in SAMPLER_CHOICES
-                                else "euler",
+                                list(SAMPLER_CHOICES), value="euler", interactive=False,
                                 label="Sampler", scale=1,
-                                info="euler = native flow. unipc = UniPC. (DPM++/DPM2a impossible: "
-                                     "FLUX.2 Klein forces custom sigmas.)")
+                                info="Euler only on FLUX.3: the model's own flow-matching "
+                                     "schedule. Other choices are ignored.")
                             schedule_dd = gr.Dropdown(
-                                list(SCHEDULE_CHOICES),
-                                value=_norm_schedule(CONFIG.get("default_schedule")),
+                                list(SCHEDULE_CHOICES), value="sgm_uniform", interactive=False,
                                 label="Schedule", scale=1,
-                                info="sigma schedule (ComfyUI-style). sgm_uniform = native flow-matching "
-                                     "(what ComfyUI calls 'simple'). beta/karras/exponential remap "
-                                     "the sigmas.")
+                                info="sgm_uniform only on FLUX.3 (the native shift 6.93 schedule). "
+                                     "Other choices are ignored.")
                         # set_sampler/set_schedule return a status: it is DISPLAYED
                         # instead of thrown away (otherwise Gradio warns "returned too many
                         # output values").
@@ -4672,9 +4704,10 @@ def build_ui():
                                 "— weights stay BF16, they just shuttle between RAM and GPU.\n\n"
                                 "- **auto** (default) — at model load, measures the *free* VRAM (all processes "
                                 "counted) and picks `none` only when the model + activations provably fit; "
-                                "otherwise `model`/`sequential`. Klein 4B is ~15 GB all-in so `auto` usually "
-                                "resolves to `none` on 20 GB+ cards; the 9B (~35 GB) resolves to `model` (a "
-                                "GGUF is forced to `model` anyway). The verdict is cached per GPU + model "
+                                "otherwise `model`/`sequential`. FLUX.3 is about 19 GB all-in in bf16 (14.4 "
+                                "fp8r, 13.5 nvfp4, BFL's figures) so `auto` usually resolves to `none` on "
+                                "24 GB+ cards and to `model` on 16 GB ones (a GGUF is forced to `model` "
+                                "anyway). The verdict is cached per GPU + model "
                                 "(cache/hw_profile.json) — use **Re-test VRAM** after closing/opening another "
                                 "GPU app.\n"
                                 "- **none** — everything stays in VRAM. **Fastest.** Use it when you have enough "
@@ -4693,8 +4726,8 @@ def build_ui():
                             ckpt_extra_dir_tb = gr.Textbox(
                                 value=cz_pipeline.CHECKPOINTS_EXTRA_DIR,
                                 label="Extra checkpoints folder (optional)",
-                                placeholder="e.g. D:\\models\\FLUX.2",
-                                info="Merged into the single 'Klein checkpoint' list above. Leave empty to disable.")
+                                placeholder="e.g. D:\\models\\FLUX.3",
+                                info="Merged into the single 'FLUX.3 checkpoint' list above. Leave empty to disable.")
                             esrgan_dir_tb = gr.Textbox(value=cz_esrgan.ESRGAN_DIR,
                                                        label="ESRGAN_DIR (.pth/.safetensors folder)")
                             with gr.Row():
@@ -4702,22 +4735,30 @@ def build_ui():
                                 save_paths_btn = gr.Button("Save paths", size="sm")
                             paths_status = gr.Markdown("")
                             with gr.Column():
-                                variant_rb = gr.Radio(
-                                    ["4B", "9B"], value=_variant_of_repo(),
-                                    label="Klein family",
-                                    info="A complete base swap. The 4B is Apache-2.0 and "
-                                         "fits whole on a 32 GB card; the 9B is "
-                                         "non-commercial, gated, and has to stream its "
-                                         "weights (measured 2.3 s against 9.8 s an "
-                                         "image). The menu below follows: a checkpoint "
-                                         "of one family does not load in the other.")
+                                with gr.Row():
+                                    variant_rb = gr.Radio(
+                                        list(VARIANT_CHOICES), value=_variant_of_repo(),
+                                        label="FLUX.3 checkpoint", scale=2,
+                                        info="A complete base swap, same licence and same "
+                                             "weight. Distilled: 16 steps, no CFG, the "
+                                             "default. Base: undistilled, about 50 steps "
+                                             "with a real CFG and a working negative prompt, "
+                                             "three times slower.")
+                                    precision_rb = gr.Radio(
+                                        list(cz_flux3.PRECISIONS), value=cz_pipeline.PRECISION,
+                                        label="Precision", scale=2,
+                                        info="The official transformer's build: bf16 (11 GB, "
+                                             "every card), fp8r (6.3 GB, fast from RTX 40xx), "
+                                             "nvfp4 (5.3 GB, RTX 50xx Blackwell + flashinfer). "
+                                             "Ignored while a single-file checkpoint is picked.")
+                                precision_status = gr.Markdown("")
                                 _choices0 = _ckpt_choices()
                                 _vals0 = [v for _lab, v in _choices0]
                                 ckpt_dd = gr.Dropdown(
                                     choices=_choices0,
                                     value=(cz_pipeline.BASE_REPO if cz_pipeline.BASE_REPO in _vals0
                                            else (_vals0[0] if _vals0 else None)),
-                                    label="Klein checkpoint", scale=3)
+                                    label="Checkpoint (base repo or single file)", scale=3)
                                 with gr.Row():      # the buttons UNDER the dropdown (full width above)
                                     ckpt_open_btn = gr.Button("\U0001F5BC️ Browse", size="sm", scale=1,
                                                               elem_id="cz_ckpt_open")
@@ -4730,20 +4771,25 @@ def build_ui():
                                 transformer_tb = gr.Textbox(
                                     value="", scale=3,
                                     label="Transformer override (HF repo / diffusers folder)",
-                                    placeholder="HF repo with a FLUX.2 transformer",
+                                    placeholder="HF repo or folder with a FLUX.3 transformer",
                                     info="For community models with an incomplete tokenizer: "
                                          "loads only the transformer, keeps base VAE/encoder.")
                                 with gr.Row():
                                     transformer_apply_btn = gr.Button("Apply override", size="sm",
                                                                       variant="secondary")
                             with gr.Column():
+                                # Not supported on FLUX.3 (0.1): the model reads 8 hidden
+                                # states of its own Qwen3-VL-4B and nothing else fits that
+                                # slot yet. The control stays, greyed out, so a preference
+                                # from crispz-klein is shown rather than lost; cz_pipeline
+                                # announces at load time that it is not applied.
                                 te_dd = gr.Dropdown(
                                     choices=_te_choices(), value=cz_pipeline.TEXT_ENCODER or "",
                                     allow_custom_value=True, label="Text encoder",
-                                    info="Default: the base repo's own Qwen3. Or a transformers "
-                                         "folder (config.json + weights) or HF repo of the SAME "
-                                         "size, e.g. an abliterated Qwen3. Pick or paste a path; "
-                                         "changing it reloads the model and clears the prompt cache.")
+                                    interactive=False,
+                                    info="Not available on FLUX.3 yet: the model reads its own "
+                                         "Qwen3-VL-4B (8 hidden states) and no replacement fits. "
+                                         "A value set in config/preferences is kept but not applied.")
                                 with gr.Row():
                                     te_refresh_btn = gr.Button("Refresh encoders", size="sm", scale=1)
                                 te_status = gr.Markdown(_te_hint())
@@ -4804,15 +4850,15 @@ def build_ui():
                             with gr.Accordion("\U0001F50E Search CivitAI (download a LoRA)",
                                               open=False):
                                 gr.Markdown(
-                                    "*Search a LoRA by name on CivitAI. The versions of the "
-                                    "LOADED variant come first (a 4B LoRA does not load on a "
-                                    "9B base). Download goes to the LoRA folder, with a "
-                                    "SHA256 check + preview/trigger words fetched.*")
+                                    "*Search a LoRA by name on CivitAI. FLUX.3 versions come "
+                                    "first (a FLUX.2 Klein LoRA does not load here). Download "
+                                    "goes to the LoRA folder, with a SHA256 check + "
+                                    "preview/trigger words fetched.*")
                                 with gr.Row():
                                     civ_lora_q = gr.Textbox(
                                         show_label=False, scale=3, container=False,
                                         placeholder="LoRA name to search on CivitAI")
-                                    civ_lora_konly = gr.Checkbox(value=True, label="Klein only",
+                                    civ_lora_konly = gr.Checkbox(value=True, label="FLUX.3 only",
                                                                  scale=1)
                                     civ_lora_search_btn = gr.Button("Search", size="sm",
                                                                     variant="primary", scale=1,
@@ -4853,7 +4899,8 @@ def build_ui():
 
                         with gr.Accordion("\U0001F5BC️ Omni / Edit (multi-reference)", open=False):
                             gr.Markdown("*The Reference (Omni) tab is served by the BASE model itself: "
-                                        "`Flux2KleinPipeline` takes a list of images, so multi-reference "
+                                        "FLUX.3 takes a list of reference images (cited as `<ref_image_N>` "
+                                        "in the prompt), so multi-reference "
                                         "editing needs no second model and no extra VRAM. Changing the "
                                         "checkpoint changes the editor too - the field below is kept for "
                                         "API compatibility and is a no-op.*")
@@ -5072,6 +5119,7 @@ def build_ui():
                           [ckpt_status, gen_steps, guidance, performance, ckpt_dd,
                            preset_dd]) \
             .then(_ui_refresh_text_encoders, None, [te_dd, te_status])
+        precision_rb.change(_ui_set_precision, [precision_rb], [precision_status])
         # CivitAI community settings -> steps/CFG/sampler/schedule (programmatic
         # updates do not fire .change, hence the explicit .then calls).
         civitai_reco_btn.click(_ui_civitai_reco, [ckpt_dd],

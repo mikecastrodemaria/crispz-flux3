@@ -2862,6 +2862,30 @@ def check_omni_available():
 
 
 @_gpu_exclusive
+def set_precision(precision):
+    """Changes the build of the official transformer (bf16 / fp8r / nvfp4). Nothing is
+    freed: PRECISION is part of _ensure_base's cache key, so the next run swaps the
+    transformer alone (VAE and text encoder stay) through _swap_transformer. Ignored while
+    a single-file transformer is set (that file IS the precision), and said. An unknown
+    value falls back to bf16, the build every card runs."""
+    global PRECISION
+    want = str(precision or "bf16").strip().lower()
+    if want not in cz_flux3.PRECISIONS:
+        _log(f"precision '{precision}' unknown ({'/'.join(cz_flux3.PRECISIONS)}) -> bf16")
+        want = "bf16"
+    if want == PRECISION:
+        return PRECISION
+    PRECISION = want
+    if ZIMAGE_TRANSFORMER:
+        _log(f"precision -> {PRECISION}: noted, but the single-file transformer "
+             f"{os.path.basename(ZIMAGE_TRANSFORMER)} is in use and carries its own; it "
+             f"applies once you go back to the base repo's transformer.")
+    else:
+        _log(f"precision -> {PRECISION}: transformer swap on next run (VAE and text "
+             f"encoder kept)")
+    return PRECISION
+
+
 def set_offload_mode(mode):
     """Changes the CPU offload mode. Invalidates the pipe (the hooks are set at load
     time). An unknown value -> 'auto' (never 'none': the fallback must be the SAFE mode)."""

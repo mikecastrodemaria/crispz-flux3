@@ -102,7 +102,17 @@ FLUX.2-klein-4B : l'ancien tri 4B/9B laisserait passer un fichier FLUX.2.
 Piège diffusers : `ModularPipeline.blocks` renvoie une **copie** ; les vrais blocs sont
 dans `mp._blocks` (c'est là qu'on rattache `hook.owner`).
 
-## 5. État au 28/10/2026 (branche `wip/flux3-engine`, lots A et B livrés)
+## 5. État au 28/10/2026 (branche `wip/flux3-engine`, lots A, B et C livrés)
+
+Fait au lot C : `FLUX3_DISTILLED` / `FLUX3_BASE` dans cz_ui (depuis cz_flux3), radio
+"FLUX.3 checkpoint" Distilled / Base, radio "Precision" bf16 / fp8r / nvfp4 branchée sur
+`cz_pipeline.set_precision()` (persistée dans `flux3_precision`, swap du transformer seul
+au prochain run), `BASE_REPO_NOTES` par repo (licence Kommunity, gated, VRAM), aide de
+l'onglet Edit avec `<ref_image_N>`, `cz_protocol.MAX_REFS` = 10 (l'onglet garde 4 slots),
+Sampler / Schedule et Text encoder grisés avec leur explication, textes "Klein" / "FLUX.2"
+remplacés, le bouton CivitAI n'applique plus le sampler. Test : `set_precision` et le
+sélecteur dans `tests/test_flux3_profiles.py` (5). Repo nettoyé (commit cabef91) : notes de
+travail, benches klein, `tests/test_klein_e2e.py` et `assets/` restent en local.
 
 Fait au lot B : profils `flux-3-image-klein-base` (50 / 3,5) avant `flux-3-image-klein`
 (16 / 1,0) dans `cz_core` et `config-sample.txt`, garde contre la clé `klein` d'un
@@ -132,8 +142,10 @@ Fait avant (commit 8bd62a6) :
   des checkpoints par famille (`_flux3_file_refusal`, `list_checkpoints`,
   `checkpoint_refusal`), refus des LoRAs FLUX.2 (`_lora_unsupported`).
 
-Suite de tests mesurée après le lot B : **495 passent, 40 échouent** (après le lot A :
-498 / 33 ; avant : 491 / 24). Les 7 échecs ajoutés par le lot B attendent tous 4 steps ou
+Suite de tests mesurée après le lot C : **489 passent, 47 échouent** (B : 495 / 40 ;
+A : 498 / 33 ; avant : 491 / 24). Les 7 échecs ajoutés par le lot C : `test_civitai_search`
+(4, libellés CivitAI "Flux.2 Klein") et `test_preset_model_switch` (3, les constantes
+`KLEIN_BASE_4B/9B` supprimées). Les 7 échecs ajoutés par le lot B attendent tous 4 steps ou
 le catalogue Consistence-Edit de FLUX.2 : `test_detailer_steps` (2),
 `test_edit_lora_presets` (3), `test_undistilled_guidance::..._gets_the_right_profile`,
 `test_preset_model_switch::test_the_refusal_leads_with_the_action`. Les 33 échecs testent tous le comportement FLUX.2 (4B/9B par largeur, dequant
@@ -212,7 +224,7 @@ Acceptation : `tests/test_flux3_adapter.py` vert ; un nouveau test
 Acceptation : `profile_for_model("black-forest-labs/flux-3-image-klein")` = (16, 1.0) ;
 `...-base` = (50, 3.5) ; test dédié.
 
-### Lot C : interface (cz_ui.py, environ 68 références)
+### Lot C : interface (cz_ui.py) (FAIT le 28/10/2026 ; l'onglet Edit garde 4 slots, le protocole prend 10 refs)
 
 1. `KLEIN_BASE_4B/9B` deviennent `FLUX3_DISTILLED/FLUX3_BASE` (depuis cz_flux3) ;
    `ZIMAGE_BASE_REPOS` lit `flux3_base_repos`.
