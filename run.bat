@@ -28,6 +28,9 @@ if errorlevel 1 (
 )
 
 set RUNPY=!PYCMD!
+REM .venv (install.bat) first, then env (the Pinokio launcher): the same rule as
+REM boot_check.bat, so the diagnosis and the app run on the same interpreter.
+if "!USE_VENV!"=="1" if exist "env\Scripts\python.exe" set RUNPY=env\Scripts\python.exe
 if "!USE_VENV!"=="1" if exist ".venv\Scripts\python.exe" set RUNPY=.venv\Scripts\python.exe
 
 REM ESRGAN_DIR: an existing variable wins, otherwise the sdlibs folder when it exists, otherwise the local one

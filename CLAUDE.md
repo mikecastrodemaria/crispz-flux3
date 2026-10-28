@@ -52,6 +52,10 @@ diffusers 0.42.1, transformers 5.21) : `.venv-test/Scripts/python -m pytest test
 --ignore=tests/test_klein_e2e.py`.
 
 Pièges déjà rencontrés :
+- `boot_check.bat` sans `.venv` (28/10) : le diagnostic tournait sur `py -3.10` et `run.bat`
+  lançait `py -3.13` sans gradio, d'où un crash au démarrage. Les trois .bat suivent la
+  même règle (`.venv`, puis `env` de Pinokio, puis Python 3.13 > 3.12 > 3.11) et la
+  vérification diffusers/gradio est bloquante. Sur une machine sans `.venv` : `install.bat`.
 - `.gitignore` excluait tout `tests/` (règle héritée pour des images locales) : le premier
   `tests/test_flux3_adapter.py` n'a jamais été commité et a dû être réécrit. Corrigé en
   `tests/*` + `!tests/*.py` ; vérifier `git status` après tout nouveau fichier de test.

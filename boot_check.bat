@@ -49,18 +49,44 @@ echo    crispz-flux3 - Boot Check
 echo ====================================================
 echo.
 
-REM --- The interpreter (the venv wins) ---
+REM --- The interpreter: the SAME rule as run.bat, or the diagnosis runs on one Python
+REM     and the app on another (seen on 2026-10-28: py -3.10 said "torch OK", run.bat
+REM     started py -3.13 without gradio, crash). .venv (install.bat) first, then env
+REM     (the Pinokio launcher), then the newest Python 3.11+ (FLUX.3's diffusers and
+REM     Pillow are not published for 3.10).
 set "RUNPY="
+set "VENV_NOTE="
 if exist ".venv\Scripts\python.exe" set "RUNPY=.venv\Scripts\python.exe"
+if not defined RUNPY if exist "env\Scripts\python.exe" set "RUNPY=env\Scripts\python.exe"
 if not defined RUNPY (
-    where py >nul 2>&1 && ( set "RUNPY=py -3.10" ) || ( set "RUNPY=python" )
+    set "VENV_NOTE=1"
+    where py >nul 2>&1
+    if errorlevel 1 (
+        set "RUNPY=python"
+    ) else (
+        set "RUNPY=py"
+        for %%v in (3.11 3.12 3.13) do (
+            py -%%v -c "import sys" >nul 2>&1
+            if not errorlevel 1 set "RUNPY=py -%%v"
+        )
+    )
 )
 
 echo [1/5] Python : !RUNPY!
 !RUNPY! --version 2>nul
 if errorlevel 1 (
-    echo    [ERROR] Python not found. Install Python 3.10+ then run install.bat.
+    echo    [ERROR] Python not found. Install Python 3.11+ ^(3.13 advised^) then run install.bat.
     pause & exit /b 1
+)
+!RUNPY! -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
+if errorlevel 1 (
+    echo    [BLOCKING] this Python is older than 3.11: diffusers 0.42.1 ^(FLUX.3^) and Pillow 13
+    echo    are not published for it. Install Python 3.11+ and run install.bat.
+    pause & exit /b 1
+)
+if defined VENV_NOTE (
+    echo    [INFO] no .venv here: the global Python is used. For the validated environment
+    echo    ^(torch cu128, diffusers 0.42.1^), run install.bat once.
 )
 echo.
 
@@ -112,7 +138,7 @@ echo.
 set "HW=!errorlevel!"
 echo.
 if "!HW!"=="1" (
-    echo    [ERROR] PyTorch missing -^> run install.bat.
+    echo    [ERROR] PyTorch missing in this Python -^> run install.bat.
     pause & exit /b 1
 )
 if "!HW!"=="3" (
@@ -122,10 +148,18 @@ if "!HW!"=="3" (
 )
 if "!HW!"=="2" echo    [WARN] CPU mode: generating will be very slow.
 
-REM --- 4. The diffusers pipeline of this model family ---
-echo [4/5] diffusers...
-!RUNPY! -c "from diffusers import Flux2KleinPipeline, Flux2KleinInpaintPipeline; print('    FLUX.2 Klein pipelines OK')" 2>nul
-if errorlevel 1 echo    [WARNING] FLUX.2 Klein pipelines unavailable -^> run install.bat / update.bat.
+REM --- 4. The diffusers blocks of this model family, and the UI framework ---
+REM     BLOCKING, not a warning: launching anyway ends in an ImportError traceback a few
+REM     seconds later, in the window that closes. FLUX.3 has no pipeline class, diffusers
+REM     serves it as modular blocks (0.42.1+).
+echo [4/5] diffusers / gradio...
+!RUNPY! -c "from diffusers.modular_pipelines import Flux3DistilledAutoBlocks, Flux3AutoBlocks; import gradio; print('    FLUX.3 modular blocks OK, gradio', gradio.__version__)" 2>nul
+if errorlevel 1 (
+    echo    [BLOCKING] diffusers 0.42.1+ ^(FLUX.3 modular blocks^) or gradio missing in this Python.
+    echo    Run install.bat ^(creates .venv with the validated versions^), or update.bat
+    echo    if .venv exists. The app was not started.
+    pause & exit /b 4
+)
 echo.
 
 REM --- 5. Models: we read the REAL folders of the config, not a hardcoded path ---

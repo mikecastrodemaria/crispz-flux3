@@ -36,23 +36,23 @@ def arch_name(major, minor):
 def offload_reco(vram_gb):
     """The offload mode advised according to the VRAM.
 
-    A landmark measured on this project: a bf16 FLUX transformer weighs ~23.8 GB and its
-    T5 encoder ~9.5 GB (~33 GB in total) -> it does not fit in 32 GB, hence the
-    offload. A Q8 GGUF of the same model drops to ~12.7 GB and fits with room to spare.
+    Landmarks measured on this project (RTX 5090, 2026-10-28): FLUX.3 Image Klein in bf16
+    is 18.8 GB resident for the whole surface and peaks at 23.7 GB on the first image;
+    BFL's fp8r build is 14.4 GB, nvfp4 13.5 GB (their figures).
     'sequential' moves every submodule on every forward: very slow
     (measured ~3 s/step against ~1.1 s/step in 'model'), to be kept for the small cards.
     """
-    if vram_gb >= 30:
-        return ("none", "compact models (GGUF Q8, FLUX.2 Klein 4B) fit whole. "
-                        "For a big bf16 model (~33 GB), switch to 'model'.")
+    if vram_gb >= 23:
+        return ("none", "FLUX.3 Image Klein bf16 fits whole (18.8 GB resident, 23.7 GB "
+                        "peak measured on an RTX 5090).")
     if vram_gb >= 20:
-        return ("model", "a whole transformer fits on the GPU; the text encoder is "
-                         "evicted once the prompt is encoded.")
+        return ("auto", "bf16 is on the edge (18.8 GB + the activations): 'auto' measures "
+                        "the free VRAM at load time; or pick fp8r (14.4 GB) in Precision.")
     # The threshold at 11 and not 12: a card sold as "12 GB" exposes ~11.6-11.9 GB.
     # Putting those in 'sequential' would cost ~3x the time per step (measured) for nothing.
     if vram_gb >= 11:
-        return ("model", "prefer the GGUF quantizations (Q8 ~12.7 GB, Q4 ~7 GB) "
-                         "to keep some headroom.")
+        return ("model", "pick fp8r (14.4 GB) or nvfp4 (13.5 GB, RTX 50xx) in Precision, "
+                         "or a GGUF build, to keep some headroom.")
     if vram_gb >= 7:
         return ("sequential", "tight card: GGUF Q4 advised, 1024px max, "
                               "and expect slow steps.")

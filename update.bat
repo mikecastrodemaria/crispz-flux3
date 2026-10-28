@@ -39,6 +39,7 @@ echo.
 REM --- The interpreter ---
 set "RUNPY="
 if exist ".venv\Scripts\python.exe" set "RUNPY=.venv\Scripts\python.exe"
+if not defined RUNPY if exist "env\Scripts\python.exe" set "RUNPY=env\Scripts\python.exe"
 if not defined RUNPY (
     where py >nul 2>&1 && ( set "RUNPY=py -3" ) || ( set "RUNPY=python" )
 )
