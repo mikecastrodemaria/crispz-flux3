@@ -276,8 +276,17 @@ Acceptation : suite complète verte sur CPU, 0 échec, 0 test ignoré sans raiso
 
 ### Lot F : documentation et livraison
 
+Demande de Mike (28/10) : dès qu'une version est testable et utilisable, faire un vrai
+rendu d'image (sur la 5090, le e2e) pour remettre des captures dans le README, et
+documenter la nouvelle version en SUPPRIMANT du README, du CHANGELOG courant et de
+config-sample ce qui venait de crispz-klein et n'est plus d'actualité (4B/9B, dequant
+ComfyUI, encodeur de remplacement, trim de l'encodeur, Consistence-Edit, 4 steps...).
+L'historique reste dans FORK-klein.md.
+
 1. README : retirer le bandeau WIP, décrire FLUX.3 (16 steps, références `<ref_image_N>`,
-   précisions, licence). Les captures d'écran et mesures viendront du e2e de Mike.
+   précisions, licence). Les captures d'écran et mesures viendront du e2e de Mike ;
+   `assets/` est en local seulement (voir .gitignore), à re-versionner avec les captures
+   FLUX.3.
 2. FORK.md : mettre à jour la feuille de route (étapes faites) et les décisions (§4).
 3. CHANGELOG : entrée 0.1.0.
 4. Merge `wip/flux3-engine` dans `main` (fast-forward ou merge commit, au nom de Mike),
