@@ -19,6 +19,7 @@ done
 
 echo "=== crispz-flux3 - update ==="
 RUNPY=python3
+export PYTHONUTF8=1   # trustmark's sdist setup.py is not cp1252-safe
 [ -x ".venv/bin/python" ] && RUNPY=".venv/bin/python"
 [ -x "env/bin/python" ] && RUNPY="env/bin/python"
 # git-bash / msys2 under Windows: the venv is in Scripts/, not bin/. Without this we
@@ -76,7 +77,7 @@ else
   REQTMP="${TMPDIR:-/tmp}/cz_req_nopillow.txt"
   grep -v '^pillow==' "$REQFILE" > "$REQTMP"
   if "$RUNPY" -m pip install -r "$REQTMP"; then
-    "$RUNPY" -m pip install --no-deps --upgrade "pillow==12.3.0" >/dev/null 2>&1 || true
+    "$RUNPY" -m pip install --no-deps --upgrade "pillow==13.0.0" >/dev/null 2>&1 || true
   else
     echo "[ERROR] pip install failed. Possible restore:"
     echo "  $RUNPY -m pip install -r $SNAP"
@@ -102,7 +103,7 @@ if [ "$HW" = "3" ]; then
   echo "[BLOCKING] torch does not support this card (see the fix above)."
   exit 3
 fi
-"$RUNPY" -c "from diffusers import Flux2KleinPipeline, Flux2KleinInpaintPipeline; print('diffusers: FLUX.2 Klein pipelines OK')" || {
+"$RUNPY" -c "from diffusers.modular_pipelines import Flux3DistilledAutoBlocks, Flux3AutoBlocks; print('diffusers: FLUX.3 modular blocks OK')" || {
   echo "[ERROR] diffusers no longer ships the FLUX.2 Klein pipelines."
   echo "  Run install.sh again, or restore: $RUNPY -m pip install -r $SNAP"; exit 1; }
 "$RUNPY" -c "import cz_ui; print('app: imports OK')" || {

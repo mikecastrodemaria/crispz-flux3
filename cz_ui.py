@@ -564,13 +564,12 @@ def _refresh_models(new_dir):
 # unlike a single-file checkpoint which only swaps the transformer. Both official
 # checkpoints are offered: the distilled one stays the default (16 steps, the one
 # DEFAULT_BASE_REPO points at), the base one when a project wants a real CFG.
-# Overridable through config `flux3_base_repos` (`klein_base_repos` is still read for a
-# config.txt copied from crispz-klein).
+# Overridable through config `flux3_base_repos`. crispz-klein's `klein_base_repos` is NOT
+# read: its values are FLUX.2 repos, which this build refuses anyway.
 import cz_flux3
 FLUX3_DISTILLED = cz_flux3.FLUX3_DISTILLED
 FLUX3_BASE = cz_flux3.FLUX3_BASE
 ZIMAGE_BASE_REPOS = [r for r in (CONFIG.get("flux3_base_repos")
-                                 or CONFIG.get("klein_base_repos")
                                  or [FLUX3_DISTILLED, FLUX3_BASE])
                      if isinstance(r, str) and r.strip()]
 # A base repo coming from the config/prefs must stay selectable even when it is absent

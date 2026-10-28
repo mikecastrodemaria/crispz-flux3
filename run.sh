@@ -14,8 +14,12 @@ for a in "$@"; do
 done
 
 # The base Python
-if command -v python3.10 >/dev/null 2>&1; then
-    PYCMD="python3.10"
+if command -v python3.13 >/dev/null 2>&1; then
+    PYCMD="python3.13"
+elif command -v python3.12 >/dev/null 2>&1; then
+    PYCMD="python3.12"
+elif command -v python3.11 >/dev/null 2>&1; then
+    PYCMD="python3.11"
 elif command -v python3 >/dev/null 2>&1; then
     PYCMD="python3"
 else

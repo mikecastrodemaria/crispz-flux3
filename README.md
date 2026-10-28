@@ -1013,7 +1013,7 @@ python app.py --cli -i in.png -m 4x-ClearRealityV1_Soft.safetensors --no-refine 
 
 ### Requirements
 
-- Python 3.10+
+- Python 3.11+ (3.13 advised; diffusers 0.42.1 and Pillow 13 are not published for 3.10)
 - PyTorch **already installed** with your CUDA build (the project targets
   PyTorch 2.7+ / CUDA 12.8). **NEVER reinstall torch** from this project; it
   aligns with your existing environment.

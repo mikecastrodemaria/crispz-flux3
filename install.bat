@@ -14,12 +14,17 @@ REM   --no-venv   installs straight onto the current Python.
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
+REM pip builds trustmark from an sdist whose setup.py reads a file as cp1252 and dies
+REM on it ("charmap codec can't decode byte 0x90"); UTF-8 mode fixes it for every build.
+set PYTHONUTF8=1
 
-REM The pipeline expected for this model family. The ONLY line that differs
-REM between crispz-studio (ZImage), crispz-krea2 (Krea2), crispz-qwen-edit (Qwen)
-REM and crispz-flux3 (FLUX.2). Inpaint is the right marker here: it is the one
-REM that ALSO serves as img2img (a full white mask), see FORK.md.
-set CHECK_PIPE=Flux2KleinInpaintPipeline
+REM The diffusers symbol expected for this model family. The ONLY line that differs
+REM between crispz-studio (ZImage), crispz-krea2 (Krea2), crispz-qwen-edit (Qwen),
+REM crispz-klein (FLUX.2) and crispz-flux3 (FLUX.3). FLUX.3 has no pipeline class:
+REM diffusers serves it as a MODULAR block chain, and the distilled auto blocks are
+REM what cz_flux3 builds on (present from diffusers 0.42.1, see requirements.txt).
+set CHECK_MODULE=diffusers.modular_pipelines
+set CHECK_PIPE=Flux3DistilledAutoBlocks
 
 REM --- flags ---
 set USE_VENV=1
@@ -46,18 +51,28 @@ if "!ISOLATED!"=="1" (
 )
 echo.
 
-REM 1) The base Python
+REM 1) The base Python. 3.11 or newer: diffusers 0.42.1 (FLUX.3) and Pillow 13 are
+REM    not published for 3.10 (checked 2026-10-28, "Requires-Python >=3.11"). The lock
+REM    was validated on 3.13; 3.12 and 3.11 are accepted.
 where py >nul 2>&1
 if errorlevel 1 (
     where python >nul 2>&1
     if errorlevel 1 (
-        echo [ERROR] Python not found. Install Python 3.10+ from python.org.
+        echo [ERROR] Python not found. Install Python 3.11+ ^(3.13 advised^) from python.org.
         exit /b 1
     )
     set PYCMD=python
 ) else (
-    py -3.10 -c "import sys" >nul 2>&1
-    if errorlevel 1 ( set PYCMD=py ) else ( set PYCMD=py -3.10 )
+    set PYCMD=py
+    for %%v in (3.11 3.12 3.13) do (
+        py -%%v -c "import sys" >nul 2>&1
+        if not errorlevel 1 set PYCMD=py -%%v
+    )
+)
+!PYCMD! -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] !PYCMD! is older than 3.11. diffusers 0.42.1 ^(FLUX.3^) needs Python 3.11+.
+    exit /b 1
 )
 echo Base Python: !PYCMD!
 !PYCMD! --version
@@ -135,7 +150,7 @@ if "!ISOLATED!"=="1" if exist "requirements-lock.txt" set REQFILE=requirements-l
 echo Installing the dependencies from !REQFILE! ...
 if "!REQFILE!"=="requirements-lock.txt" echo   ^(includes torch cu128, ~3.5 GB to download the first time^)
 REM Pillow is filtered out of the file: gradio 5.50 declares pillow^<12 and would
-REM refuse to resolve with the 12.x pin. It is installed just after, with --no-deps.
+REM refuse to resolve with the 13.x pin. It is installed just after, with --no-deps.
 REM The pin stays in the lock so that Dependabot sees the fixed version.
 REM onnxruntime (the CPU build) is filtered out too: rembg pulls it as a dependency,
 REM and once installed it HIDES onnxruntime-gpu at import time (the same module name,
@@ -152,18 +167,19 @@ echo.
 
 REM 5bis) Pillow, installed APART and with --no-deps.
 REM   gradio 5.50 declares "pillow<12.0", but the Pillow CVEs (including the ones
-REM   reachable through the images the user opens) are only fixed in 12.x. That
-REM   bound of gradio's is conservative: checked against this code base, Pillow 12
-REM   works. So we install it afterwards, without triggering again the resolution
-REM   that would refuse the combination.
-set "PILLOW_PIN=pillow==12.3.0"
+REM   reachable through the images the user opens) are only fixed in 13.0 (Dependabot
+REM   on 2026-10-28: every open Pillow alert says ^< 13.0.0). That bound of gradio's is
+REM   conservative: checked against this code base with Pillow 13 (smoke test, image
+REM   tests), it works. So we install it afterwards, without triggering again the
+REM   resolution that would refuse the combination.
+set "PILLOW_PIN=pillow==13.0.0"
 echo Installing !PILLOW_PIN! ^(apart: works around gradio's pillow^<12 bound^)...
 !RUNPY! -m pip install --no-deps --upgrade "!PILLOW_PIN!"
 if errorlevel 1 echo [WARN] Pillow install failed -^> inherited version kept.
 echo.
 
-REM 6) Check that diffusers exposes the pipeline of this model family
-!RUNPY! -c "from diffusers import !CHECK_PIPE!; print('!CHECK_PIPE! OK')"
+REM 6) Check that diffusers exposes the model family (FLUX.3 modular blocks)
+!RUNPY! -c "from !CHECK_MODULE! import !CHECK_PIPE!; print('!CHECK_PIPE! OK')"
 if errorlevel 1 (
     echo [ERROR] diffusers does not contain !CHECK_PIPE!.
     exit /b 1

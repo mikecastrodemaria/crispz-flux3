@@ -102,7 +102,27 @@ FLUX.2-klein-4B : l'ancien tri 4B/9B laisserait passer un fichier FLUX.2.
 Piège diffusers : `ModularPipeline.blocks` renvoie une **copie** ; les vrais blocs sont
 dans `mp._blocks` (c'est là qu'on rattache `hook.owner`).
 
-## 5. État au 28/10/2026 (branche `wip/flux3-engine`, lots A, B et C livrés)
+## 5. État au 28/10/2026 (branche `wip/flux3-engine`, lots A à D livrés)
+
+Fait au lot D : `requirements.txt` sur `diffusers==0.42.1` (PyPI), `transformers>=5,<6`,
+`huggingface-hub>=1.32` ; `requirements-lock.txt` régénéré depuis un venv vierge Python
+3.13 + torch 2.11.0 cu128 (`import app` et les blocs modulaires FLUX.3 vérifiés) ;
+**Python 3.11 minimum** (diffusers 0.42.1 et Pillow 13 ne sont pas publiés pour 3.10) :
+install.bat/.sh, run.bat/.sh, update.bat/.sh choisissent 3.13 > 3.12 > 3.11 et refusent
+en dessous, la CI passe en 3.13, `PYTHONUTF8=1` posé par les installeurs (trustmark) ;
+marqueur d'installation = `diffusers.modular_pipelines.Flux3DistilledAutoBlocks` ;
+Pillow 13.0.0 installé à part (gradio 5.50 déclare <12), `rembg>=2.0.82`.
+
+**Cette machine EST la RTX 5090** (32 Go, driver 610.60) et la session HF locale a accès
+aux deux repos gated FLUX.3 : le e2e GPU (lot E) et les rendus du README (lot F) peuvent
+tourner ici, avec l'accord de Mike (environ 20 Go à télécharger).
+
+Dependabot après le lot D (62 alertes sur `main` au 27/10, toutes sur
+requirements-lock.txt) : Pillow (< 13.0.0), transformers (< 5.10), accelerate (<= 1.14)
+et rembg (< 2.0.82) sont closes par le nouveau lock une fois fusionné dans `main`.
+Restent ouvertes et assumées : **gradio** (correctifs en 6.6 à 6.16, la borne <6 est
+volontaire, bug Brotli/h11 de gradio 6, à réévaluer en v0.2) et **torch** (< 2.13 ; 2.11
+est la dernière build de l'index cu128, une roue CPU de PyPI n'est pas une option).
 
 Fait au lot C : `FLUX3_DISTILLED` / `FLUX3_BASE` dans cz_ui (depuis cz_flux3), radio
 "FLUX.3 checkpoint" Distilled / Base, radio "Precision" bf16 / fp8r / nvfp4 branchée sur
@@ -245,7 +265,7 @@ Acceptation : `profile_for_model("black-forest-labs/flux-3-image-klein")` = (16,
 Acceptation : `tools/smoke_test.py` vert (22 checks, `build_ui()` compris) ;
 `tests/test_ui_binding_returns.py` vert.
 
-### Lot D : dépendances et installation
+### Lot D : dépendances et installation (FAIT le 28/10/2026, Python 3.11+ requis)
 
 1. `requirements.txt` : `diffusers==0.42.1` (PyPI, plus de git+commit),
    `transformers>=5,<6`, `huggingface-hub>=1.32`, reste inchangé. Vérifier que gradio 5.50

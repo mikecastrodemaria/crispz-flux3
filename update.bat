@@ -17,6 +17,7 @@ REM   --no-pull      skip the git pull (resynchronise the deps only)
 REM   --shared       use requirements.txt instead of the lock (a shared venv)
 
 setlocal enabledelayedexpansion
+set PYTHONUTF8=1
 title crispz-flux3 - Update
 cd /d "%~dp0"
 
@@ -39,7 +40,7 @@ REM --- The interpreter ---
 set "RUNPY="
 if exist ".venv\Scripts\python.exe" set "RUNPY=.venv\Scripts\python.exe"
 if not defined RUNPY (
-    where py >nul 2>&1 && ( set "RUNPY=py -3.10" ) || ( set "RUNPY=python" )
+    where py >nul 2>&1 && ( set "RUNPY=py -3" ) || ( set "RUNPY=python" )
 )
 echo Interpreter: !RUNPY!
 
@@ -105,7 +106,7 @@ if "!NEEDDEPS!"=="0" (
     if not errorlevel 1 (
         REM Pillow is outside the lock (gradio's pillow^<12 bound) -> installed apart,
         REM otherwise an update would REGRESS the fixed version. See install.bat.
-        !RUNPY! -m pip install --no-deps --upgrade "pillow==12.3.0" >nul 2>&1
+        !RUNPY! -m pip install --no-deps --upgrade "pillow==13.0.0" >nul 2>&1
     )
     if errorlevel 1 (
         echo [ERROR] pip install failed. The environment may be inconsistent.
@@ -134,7 +135,7 @@ if "!HW!"=="3" (
     echo [BLOCKING] torch no longer supports this card ^(see the fix above^).
     pause & exit /b 3
 )
-!RUNPY! -c "from diffusers import Flux2KleinPipeline, Flux2KleinInpaintPipeline; print('diffusers: FLUX.2 Klein pipelines OK')"
+!RUNPY! -c "from diffusers.modular_pipelines import Flux3DistilledAutoBlocks, Flux3AutoBlocks; print('diffusers: FLUX.3 modular blocks OK')"
 if errorlevel 1 (
     echo [ERROR] diffusers no longer ships the FLUX.2 Klein pipelines.
     echo   Run install.bat again, or restore: !RUNPY! -m pip install -r "%TEMP%\cz_pip_before.txt"

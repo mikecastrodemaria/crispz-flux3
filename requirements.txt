@@ -1,26 +1,23 @@
-# DO NOT reinstall torch: keep your existing PyTorch 2.7 / CUDA 12.8 build.
-# The FLUX.2 pipelines (Flux2KleinPipeline / Flux2KleinInpaintPipeline) are only in
-# diffusers from source, hence the git+ below.
+# DO NOT reinstall torch: keep your existing PyTorch build (2.7+ with CUDA 12.8 on the
+# RTX 50xx). requirements-lock.txt pins the validated cu128 torch for an ISOLATED venv.
 
-# CAREFUL: the commit is PINNED on purpose.
-# A `git+.../diffusers` with no commit takes the HEAD of the day, which is not a
-# bound but a time bomb: diffusers main moved to huggingface-hub>=1.23 while
-# transformers<5 requires huggingface-hub<1.0 -> ResolutionImpossible at install
-# time, for everyone, overnight. This commit is the one THIS repo was validated
-# on (it differs from one fork to the next, see requirements-lock.txt).
-# This commit does expose `diffusers.pipelines.flux2` (Flux2Pipeline, Flux2KleinPipeline,
-# Flux2KleinInpaintPipeline, Flux2KleinKVPipeline) in 0.39.0.dev0 - checked on
-# 2026-09-05, the complete port was validated on it.
-# To try a more recent version: replace the hash below, run install.bat again,
-# and check that `transformers` still installs.
-git+https://github.com/huggingface/diffusers@de6b049539a07bda562c9b8c275e759aa52a3700
+# diffusers 0.42.1 is the first PyPI release with FLUX.3 Image Klein
+# (diffusers.modular_pipelines.Flux3DistilledAutoBlocks / Flux3AutoBlocks,
+# Flux3Transformer2DModel, BFLQuantizationConfig for BFL's fp8r / nvfp4 files). No more
+# git+commit: crispz-klein needed one because the FLUX.2 pipelines were unreleased, and
+# that pin cost an install breakage the day diffusers main moved its huggingface-hub
+# bound. An exact pin, not a lower bound: the modular API is young and this fork wires
+# into its block chain (cz_flux3 removes blocks and inserts a hook); a newer diffusers
+# is tried on purpose, with the tests, not inherited.
+diffusers==0.42.1
 
-# transformers >= 4.51 required: FLUX.2 Klein uses a Qwen3 text encoder
-# (Qwen3ForCausalLM, see the repo's model_index.json),
-# absent before 4.51 (it fails with "module transformers has no attribute Qwen3Model").
-# The <5 bound: the 5.x line has API changes that can break the diffusers
-# source. Stay on 4.51+ (tested OK on 4.57).
-transformers>=4.51,<5
+# transformers 5.x is REQUIRED, not merely allowed: diffusers 0.42.1 wants
+# huggingface-hub>=1.32 and transformers 4.x pins huggingface-hub<1.0, so the two
+# cannot be resolved together (ResolutionImpossible at install time, seen 2026-10-27).
+# FLUX.3's text encoder is Qwen3-VL-4B (Qwen3VLForConditionalGeneration), present in 5.x.
+# The <6 bound: a major that does not exist yet is not something to inherit overnight.
+transformers>=5,<6
+huggingface-hub>=1.32
 accelerate
 sentencepiece
 spandrel
@@ -29,9 +26,9 @@ spandrel
 # Without it: "PEFT backend is required for this method" -> LoRA silently skipped.
 peft
 
-# GGUF quantized single-file transformers (GGUFQuantizationConfig). Lets a quantized
-# A quantized .gguf transformer fits in consumer VRAM, fast, no offload. Unlike
-# ComfyUI FP8 .safetensors (transformer-only, not loadable by diffusers).
+# GGUF quantized single-file transformers (GGUFQuantizationConfig): a quantized .gguf
+# FLUX.3 transformer (e.g. unsloth/flux-3-image-klein-GGUF) fits in consumer VRAM and
+# stays quantized at run time. BFL's own fp8r / nvfp4 files need nothing extra.
 gguf
 
 # Hugging Face downloads (the edit LoRA presets, Lightning, the models): the recent

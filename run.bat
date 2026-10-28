@@ -20,8 +20,11 @@ where py >nul 2>&1
 if errorlevel 1 (
     set PYCMD=python
 ) else (
-    py -3.10 -c "import sys" >nul 2>&1
-    if errorlevel 1 ( set PYCMD=py ) else ( set PYCMD=py -3.10 )
+    set PYCMD=py
+    for %%v in (3.11 3.12 3.13) do (
+        py -%%v -c "import sys" >nul 2>&1
+        if not errorlevel 1 set PYCMD=py -%%v
+    )
 )
 
 set RUNPY=!PYCMD!

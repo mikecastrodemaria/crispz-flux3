@@ -1,6 +1,7 @@
 # Optional extras (local tools that don't need the diffusion model).
 # Install:  .venv/Scripts/python -m pip install -r requirements-extra.txt
-rembg                  # Remove BG tab (downloads the u2net model on first use)
+rembg>=2.0.82          # Remove BG tab (downloads the u2net model on first use).
+                       # >=2.0.82: closes the rembg Dependabot alerts (2026-10-28).
 pillow-avif-plugin     # read .avif input images (else PIL.UnidentifiedImageError)
 # Auto-describe captioner (BLIP) needs only transformers (already installed).
 trustmark              # AI provenance: invisible watermark (write on save if

@@ -18,7 +18,8 @@ cd "$(dirname "$0")"
 # The pipeline expected for this model family. The ONLY line that differs between
 # crispz-studio (ZImage), crispz-krea2 (Krea2), crispz-qwen-edit (Qwen)
 # and crispz-flux3 (FLUX.2).
-CHECK_PIPE=Flux2KleinInpaintPipeline
+CHECK_MODULE=diffusers.modular_pipelines
+CHECK_PIPE=Flux3DistilledAutoBlocks
 
 USE_VENV=1
 ISOLATED=1
@@ -42,13 +43,23 @@ else
 fi
 echo
 
-# 1) The base Python
-if command -v python3.10 >/dev/null 2>&1; then
-    PYCMD="python3.10"
-elif command -v python3 >/dev/null 2>&1; then
+# 1) The base Python. 3.11 or newer: diffusers 0.42.1 (FLUX.3) and Pillow 13 are not
+#    published for 3.10 (checked 2026-10-28, "Requires-Python >=3.11"). The lock was
+#    validated on 3.13; 3.12 and 3.11 are accepted.
+export PYTHONUTF8=1          # trustmark's sdist setup.py is not cp1252-safe
+PYCMD=""
+for v in 3.13 3.12 3.11; do
+    if command -v "python$v" >/dev/null 2>&1; then PYCMD="python$v"; break; fi
+done
+if [ -z "$PYCMD" ] && command -v python3 >/dev/null 2>&1; then
     PYCMD="python3"
-else
-    echo "[ERROR] Python not found. Install Python 3.10+."
+fi
+if [ -z "$PYCMD" ]; then
+    echo "[ERROR] Python not found. Install Python 3.11+ (3.13 advised)."
+    exit 1
+fi
+if ! $PYCMD -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"; then
+    echo "[ERROR] $PYCMD is older than 3.11. diffusers 0.42.1 (FLUX.3) needs Python 3.11+."
     exit 1
 fi
 echo "Base Python: $PYCMD"
@@ -146,14 +157,14 @@ echo
 #   of gradio's is conservative: checked against this code base, Pillow 12 works.
 #   So we install it afterwards, without triggering again the resolution that would
 #   refuse the combination.
-PILLOW_PIN="pillow==12.3.0"
+PILLOW_PIN="pillow==13.0.0"
 echo "Installing $PILLOW_PIN (apart: works around gradio's pillow<12 bound)..."
 $RUNPY -m pip install --no-deps --upgrade "$PILLOW_PIN" \
     || echo "[WARN] Pillow install failed -> inherited version kept."
 echo
 
-# 6) Check that diffusers exposes the pipeline of this model family
-$RUNPY -c "from diffusers import $CHECK_PIPE; print('$CHECK_PIPE OK')"
+# 6) Check that diffusers exposes the model family (FLUX.3 modular blocks)
+$RUNPY -c "from $CHECK_MODULE import $CHECK_PIPE; print('$CHECK_PIPE OK')"
 echo
 
 # 7) Optional deps. The lock already contains them; in non-isolated mode the
