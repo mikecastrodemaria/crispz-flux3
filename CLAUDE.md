@@ -102,7 +102,14 @@ FLUX.2-klein-4B : l'ancien tri 4B/9B laisserait passer un fichier FLUX.2.
 Piège diffusers : `ModularPipeline.blocks` renvoie une **copie** ; les vrais blocs sont
 dans `mp._blocks` (c'est là qu'on rattache `hook.owner`).
 
-## 5. État au 28/10/2026 (branche `wip/flux3-engine`, lots A à E livrés, e2e GPU passé)
+## 5. État au 28/10/2026 (lots A à F livrés, 0.1.0 fusionnée dans `main`)
+
+Fait au lot F : README réécrit pour FLUX.3 avec les captures réelles (`assets/`, de nouveau
+versionné : capture de l'onglet Text to Image prise dans l'UI sur la 5090, rendus gen / edit /
+inpaint du e2e), README_CLI et drapeaux CLI `--flux3-model` / `--flux3-transformer` (les
+anciens restent des alias), cache dequant retiré (`tools/rebuild_dequant_cache.py`,
+`rebuild_cache.bat`, clés `dequant_cache*`), `APP_VERSION` 0.1.0, CHANGELOG 0.1.0, FORK.md
+(mesures et feuille de route). Reste : le launcher Pinokio (Mike crée le repo vide).
 
 Fait au lot E : les 47 tests FLUX.2 sont réécrits avec la même intention sur FLUX.3 (garde
 par famille, libellés FLUX.3 / FLUX.2, profils 16 / 50, catalogue d'edit LoRAs vide mais
@@ -311,7 +318,7 @@ Acceptation : installation propre dans un venv vierge ; `python -c "import app"`
 
 Acceptation : suite complète verte sur CPU, 0 échec, 0 test ignoré sans raison écrite.
 
-### Lot F : documentation et livraison
+### Lot F : documentation et livraison (FAIT le 28/10/2026, sauf le launcher Pinokio)
 
 Demande de Mike (28/10) : dès qu'une version est testable et utilisable, faire un vrai
 rendu d'image (sur la 5090, le e2e) pour remettre des captures dans le README, et

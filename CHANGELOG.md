@@ -1,12 +1,18 @@
 # Changelog
 
-All notable changes to crispz-flux3 (entries below 0.1.0-dev are crispz-klein's history). One versioned entry per feature.
+All notable changes to crispz-flux3 (entries below 0.1.0 are crispz-klein's history, kept as is). One versioned entry per feature.
 The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browser tab title.
 
 
-## 0.1.0-dev : fork of crispz-klein for FLUX.3 Image Klein
+## 0.1.0 (2026-10-28) : crispz-klein ported to FLUX.3 Image Klein
 
-The port, lot by lot (see CLAUDE.md): the cz_flux3 adapter around the diffusers FLUX.3
+The same studio on black-forest-labs/flux-3-image-klein (5.6B, 16 steps, Kommunity
+licence, gated): txt2img, multi-reference editing with <ref_image_N>, img2img / refine /
+upscale, inpaint / outpaint, detailer, FLUX.3 LoRAs and single-file checkpoints (BFL,
+ComfyUI, diffusers layouts, fp8r / nvfp4, GGUF), CLI and protocol v1. Measured on an RTX
+5090 in bf16: 18.8 GB resident, a 1024x1024 image in about 7 s, see FORK.md.
+
+What changed under the hood, lot by lot (see CLAUDE.md): the cz_flux3 adapter around the diffusers FLUX.3
 modular pipeline, the guards by model FAMILY instead of hidden width, the FLUX.3
 profiles and presets, the Distilled / Base and Precision selectors, diffusers 0.42.1
 from PyPI with transformers 5 and Python 3.11+.

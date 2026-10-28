@@ -69,8 +69,6 @@ VALIDATION.md
 run_quality_rtx5090.bat
 tools/ab_refine_guards.py
 tools/check_klein_extras.py
-# crispz-klein's screenshots; the FLUX.3 ones will come from the 5090 e2e
-assets/
 
 # --- Local test images (experiments, not versioned) ---
 tests/*

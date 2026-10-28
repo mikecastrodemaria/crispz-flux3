@@ -1,191 +1,190 @@
 # crispz-flux3
 
-> **Work in progress (0.1.0-dev).** Fork of crispz-klein for FLUX.3 Image Klein. The
-> rest of this README still describes the inherited FLUX.2 Klein behaviour: see
-> [FORK.md](FORK.md) for the port status and the roadmap.
+> FLUX.3 Image Klein txt2img + multi-reference editing + upscaler/detailer studio
+> (fork of [crispz-klein](https://github.com/mikecastrodemaria/crispz-klein), itself a
+> fork of [crispz-qwen-edit](https://github.com/mikecastrodemaria/crispz-qwen-edit) and
+> of the Fooocus-style [crispz](https://github.com/mikecastrodemaria/crispz)).
+> Current version: **0.1.0**, see [CHANGELOG.md](CHANGELOG.md). The FLUX.2 Klein era of
+> this code base (its measurements, its 4B/9B machinery, its decisions) is kept in
+> [FORK-klein.md](FORK-klein.md); the port itself, with the RTX 5090 numbers, is in
+> [FORK.md](FORK.md).
 
-> FLUX.2 Klein txt2img + multi-reference editing + upscaler/detailer studio
-> (fork of [crispz-qwen-edit](https://github.com/mikecastrodemaria/crispz-qwen-edit),
-> itself a Fooocus-style fork of
-> [crispz](https://github.com/mikecastrodemaria/crispz)).
-> Current version: **1.18.5** — see [CHANGELOG.md](CHANGELOG.md).
+![crispz-flux3: FLUX.3 Image Klein creation + editing studio](assets/screenshot.png)
+
+*The Text -> Image tab, real capture on the RTX 5090: the first image of the session, a
+1024x1024 comic panel at 16 steps in 25.9 s with the model load included; the next ones
+take about **7 s**.*
 
 ### What it produces
 
 | Generate | Edit (1 reference) | Inpaint |
 |---|---|---|
-| (captures and timings to come from the FLUX.3 run on the RTX 5090) | | |
-| `gen` — 4 steps, 2.0 s | `edit` — *"make it daytime, sunny blue sky"*, 2.8 s | `inpaint` — a moon painted into the masked corner, 2.8 s |
+| ![generate](assets/sample-gen.jpg) | ![edit](assets/sample-edit.jpg) | ![inpaint](assets/sample-inpaint.jpg) |
+| `gen`: *"a comic book panel, a woman with red hair running in the rain at night, ink lines, flat colors, dramatic angle"*, 16 steps, 7.1 s | `edit`: *"make it daytime, sunny, blue sky"*, 13.5 s | `inpaint`: *"a large bright full moon behind heavy clouds in the top right corner"* painted into the masked corner, 5.7 s |
 
-The middle image is the point of this fork: the scene changes completely while the
-character stays **pixel-identical** — same face, same pose, same clothes. That is
-multi-reference editing running in the *same* pipeline as the generation, with no
-second model loaded. All three come from `tests/test_klein_e2e.py`, which you can
-re-run yourself.
+The character stays the same across the three images: the edit and the inpaint run in
+the **same pipeline** as the generation, with no second model loaded. All three come from
+`tests/test_flux3_e2e.py` on an RTX 5090, which you can re-run yourself.
 
-A standalone **FLUX.2 Klein** creation + editing tool, **100% local**, no ComfyUI /
-SwarmUI. Engine: [`black-forest-labs/FLUX.2-klein-4B`](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B)
-— 4B parameters, **Apache 2.0**, distilled to **4 steps**.
+A standalone **FLUX.3 Image Klein** creation + editing tool, **100% local**, no ComfyUI /
+SwarmUI. Engine: [`black-forest-labs/flux-3-image-klein`](https://huggingface.co/black-forest-labs/flux-3-image-klein),
+a 5.6B transformer with a Qwen3-VL-4B text encoder, **distilled to 16 steps**, under the
+**FLUX Kommunity License**.
 
-**Why this fork.** One model covers the whole surface: `Flux2KleinPipeline` does
-txt2img *and* multi-reference editing (its `image` argument takes a list of PIL
-images), and `Flux2KleinInpaintPipeline` does inpaint *and* img2img. Measured on an
-RTX 5090: **14.9 GB of VRAM for everything**, 1024×1024 in **2.0 s**, an edit with one
-reference in 3.0 s. crispz-qwen-edit needs two 20B models for the same features.
+**What FLUX.3 changes, in two lines.** One model covers the whole surface: text-to-image
+and multi-reference editing are the same checkpoint (the references are cited in the
+prompt as `<ref_image_0>`, `<ref_image_1>`...), and img2img / inpaint are served by the
+same weights through a small adapter (`cz_flux3.py`). Measured on an RTX 5090:
+**18.8 GB of VRAM resident for everything**, 1024x1024 in **6.6 to 7.1 s**, an edit with
+one reference in 13.5 s.
 
-**Two things to know before using it.** klein-4B is step-wise distilled, so
-**negative prompts and the guidance slider have no effect** — verified, renders at
-guidance 1.0 / 4.0 / 8.0 are bit-identical (`tests/test_klein_guidance.py`). And the
-edit-LoRA catalogue holds two verified presets (`Consistence-Edit` for the 4B,
-`Consistence-Edit 9B` for the 9B): the Qwen-Image-Edit presets of the upstream fork
-are incompatible with FLUX.2. Both are announced honestly in the CLI protocol
-(`supports.negative: false`, `edit_loras: []`). Full detail in [FORK.md](FORK.md).
+**Two checkpoints, one selector.** The **distilled** repo (the default) is a 16-step flow
+map with **no CFG**: the guidance slider and the negative prompt are inert on it, and the
+app says so rather than pretending. The **base** repo
+([`flux-3-image-klein-base`](https://huggingface.co/black-forest-labs/flux-3-image-klein-base))
+is the undistilled model: about 50 steps, a **real CFG** (3.5 advised) and a working
+negative prompt, about three times slower per image. The *FLUX.3 checkpoint* radio in
+Models > Checkpoints switches between them (a complete base swap: transformer, VAE and
+encoder).
 
-> ⚠️ **4B by default, 9B on request.** `FLUX.2-klein-4B` is Apache 2.0 and is what
-> this fork ships with. `FLUX.2-klein-9B` is offered in the same dropdown, but it is
-> under the **FLUX Non-Commercial License**, is **gated** on Hugging Face and needs
-> **~29 GB of VRAM** (~35 GB of download). Picking it says all of that before the
-> first run — setup in
-> [Enabling the 9B](#enabling-the-9b--the-hugging-face-part).
+> **Both repos are gated.** The FLUX Kommunity License is free, commercial use included,
+> under 5 M USD of yearly revenue (above that, a licence from Black Forest Labs). Accept
+> it on the repo page with your Hugging Face account, then give the app a READ token
+> (`hf_token` in `config.txt`, env `HF_TOKEN`, or `huggingface-cli login`). Setup in
+> [The model (first run)](#the-model-first-run).
 
 On top of crispz's upscaler it adds:
 
-- **Text → Image** (`Flux2KleinPipeline`): generate from a prompt, with an optional
-  **Upscale after generate** toggle (under the Generate button) that auto-chains each
-  image — txt2img or Reference (Omni) — through the ESRGAN + refine pipeline, no manual
-  step. CLI equivalent:
+- **Text -> Image**: generate from a prompt, with an optional **Upscale after generate**
+  toggle (under the Generate button) that auto-chains each image, txt2img or Reference
+  (Omni), through the ESRGAN + refine pipeline, no manual step. CLI equivalent:
   `--txt2img --upscale` (see README_CLI.md).
-- **Image → Upscale** (the crispz pipeline): Real-ESRGAN + diffusion refine, 4K tiling —
+- **Image -> Upscale** (the crispz pipeline): Real-ESRGAN + diffusion refine, 4K tiling,
   plus one-click **🎲 Vary (subtle / strong)** (pure img2img re-roll of an input image,
   denoise 0.25 / 0.6, Fooocus-style).
-- **Job queue**: `+ Queue` snapshots ALL current settings (incl. model, LoRAs, sampler)
-  into a labeled job list; `Run queue` chains them unattended (overnight batches with
-  different models/settings). **⏸ Pause finishes the current job then halts**;
-  **Stop interrupts it mid-render and the interrupted job stays queued** (re-run
-  entirely on resume) — either way no job is ever lost, the queue is saved to
-  `cache/queue.json` after every change/job and **restored at startup**. VRAM
-  is purged automatically only when the model changes between jobs.
-- **X/Y/Z grid**: vary 1–3 parameters (checkpoint, sampler, steps, guidance, denoise,
-  ESRGAN model, LoRA file, LoRA weight, Performance preset, **full Prompt (A/B test)**,
-  Prompt S/R…) — every combo becomes a queued job and the run ends with an **annotated
-  contact sheet** per Z value (X columns × Y rows) saved in the output folder and shown
-  in the gallery. The values fields **autosuggest after 3 typed characters** (checkpoints
-  and LoRAs validated at startup for those axes; `__wildcards__` on the Prompt axes),
-  ↑/↓ + Tab/Enter, comma-separated segments respected.
+- **Job queue**: `+ Queue` snapshots ALL current settings (incl. model, LoRAs) into a
+  labeled job list; `Run queue` chains them unattended (overnight batches with different
+  models/settings). **⏸ Pause finishes the current job then halts**; **Stop interrupts
+  it mid-render and the interrupted job stays queued** (re-run entirely on resume).
+  Either way no job is ever lost: the queue is saved to `cache/queue.json` after every
+  change/job and **restored at startup**. VRAM is purged automatically only when the
+  model changes between jobs.
+- **X/Y/Z grid**: vary 1 to 3 parameters (checkpoint, steps, guidance, denoise, ESRGAN
+  model, LoRA file, LoRA weight, Performance preset, **full Prompt (A/B test)**, Prompt
+  S/R...): every combo becomes a queued job and the run ends with an **annotated contact
+  sheet** per Z value (X columns x Y rows) saved in the output folder and shown in the
+  gallery. The values fields **autosuggest after 3 typed characters** (checkpoints and
+  LoRAs validated at startup for those axes; `__wildcards__` on the Prompt axes),
+  up/down + Tab/Enter, comma-separated segments respected.
 - **Tag autocomplete** in the prompt/negative fields: suggestions as you type from tag
   CSVs (downloaded once into `tags/`; drop any `.csv` there to add a source) merged with
-  your local `__wildcards__`. Dropdown under the caret, ↑/↓ + Tab/Enter, Escape;
-  popularity-ranked, indexed (~sub-ms per keystroke).
-- **Inpaint / Outpaint** (one tab, 3 modes): **Brush** repaints a painted mask ·
-  **Expand sides** outpaints Left/Right/Top/Bottom (+ **Center**) ~30% per side ·
+  your local `__wildcards__`. Dropdown under the caret, up/down + Tab/Enter, Escape;
+  popularity-ranked, indexed (sub-ms per keystroke).
+- **Inpaint / Outpaint** (one tab, 3 modes): **Brush** repaints a painted mask,
+  **Expand sides** outpaints Left/Right/Top/Bottom (+ **Center**) about 30% per side,
   **Reframe** to a new aspect ratio (**Contain** = keep the whole image and fill the
-  borders, **Cover** = crop to fill). All bounded to the model's ~1 MP sweet spot (no
+  borders, **Cover** = crop to fill). All bounded to the model's 1 MP sweet spot (no
   pixel blow-up), with blurred-edge fill + feathered seams for clean blends, an optional
   **Auto-describe** (local captioner, no Ollama, automatic when the prompt is empty) to
   guide coherent fills, and an optional **Harmonize** pass (light img2img refine over the
   whole result) to unify grain/light and remove the "added zone" look. Steps follow the
   model.
 - **Remove Background** (rembg) and **Face Swap** with optional **GFPGAN restore**.
-- **🔧 Auto face detailer** (ADetailer-style): tick *Detail faces* under Generate — after
+- **🔧 Auto face detailer** (ADetailer-style): tick *Detail faces* under Generate. After
   each render (and upscale), faces are detected and each is re-refined at high resolution
-  (enlarged crop → img2img → feathered paste). Denoise slider in Advanced;
+  (enlarged crop, img2img, feathered paste). Denoise slider in Advanced;
   `face_detailer*` config keys.
-- **Models**: one **Klein checkpoint** dropdown merging the official base repo
-  (`FLUX.2-klein-4B`) with single-file `.safetensors` from a main **and** an optional
-  extra folder, a **Transformer override** (diffusers repo/folder), and **multi-LoRA**
-  (configurable **1–10 slots** + trigger words). Picking a model also auto-syncs the
-  Performance preset. Supported formats: BF16/FP16, **GGUF quants** (stay quantized in
-  VRAM), and ComfyUI **FP8 / FP8-scaled / INT8-scaled** builds (dequantized to bf16 at
-  load — bf16 memory footprint, the saving is disk/download only; at 4B that is ~8 GB
-  of RAM, so unlike the 20B forks a plain single-file is perfectly practical here).
-  Still skipped with a clear console message: misfiled LoRAs, SVDQuant/Nunchaku INT4,
-  foreign-architecture or sd.cpp-layout GGUFs.
-- **Force aspect ratio on Upscale/img2img** (Settings > Aspect ratio): 3-way radio —
-  **Off** / **Crop to fit** (centre-crop, Fooocus-style) / **Extend (outpaint)**
-  (the missing bands are generated instead, centre kept pixel-for-pixel, seams blended
-  by a light pass; config `force_ratio_mode`, `force_ratio_extend_denoise`).
+- **Models**: a **FLUX.3 checkpoint** radio (Distilled / Base), a **Precision** radio
+  (bf16 / fp8r / nvfp4), one **Checkpoint** dropdown merging the current base repo with
+  single-file FLUX.3 checkpoints from a main **and** an optional extra folder, a
+  **Transformer override** (diffusers repo/folder), and **multi-LoRA** (configurable
+  **1 to 10 slots** + trigger words). Picking a model also auto-syncs the Performance
+  preset. Supported single files: `.safetensors` in the BFL, ComfyUI or diffusers layout,
+  BFL's pre-quantized **fp8r / nvfp4** files (kept quantized), and **GGUF quants** (kept
+  quantized in VRAM). Refused with one sentence, never gigabytes later: a **FLUX.2 Klein
+  file** (it runs in crispz-klein; FLUX.3 has the same hidden width as klein-4B, so the
+  guard reads the model FAMILY off the tensor names), misfiled LoRAs, files of another
+  architecture.
+- **Force aspect ratio on Upscale/img2img** (Settings > Aspect ratio): 3-way radio,
+  **Off** / **Crop to fit** (centre-crop, Fooocus-style) / **Extend (outpaint)** (the
+  missing bands are generated instead, centre kept pixel-for-pixel, seams blended by a
+  light pass; config `force_ratio_mode`, `force_ratio_extend_denoise`).
 - **Presets (Fooocus-style)** (Settings > ⭐ Presets): **save / load / update / delete**
-  presets — a preset bundles prompt, styles, size, steps/CFG, sampler, **base repo** +
-  checkpoint, transformer and LoRAs, and **Load** switches the model/LoRAs too. Stored
-  in `presets/*.json`.
-  A **basic preset is auto-created for every loadable model** (on startup and when you
-  Refresh the checkpoint list) if it doesn't already exist yet — named after the model,
-  with steps/CFG from its profile. Existing presets are never overwritten; skipped
-  models (LoRA/SVDQuant files, foreign GGUFs) get none.
-  A single-file checkpoint only swaps the *transformer*, so it is only meaningful under
-  the base repo that provides its VAE and text encoder — which is why the preset records
-  that base and **Load switches to it** when it differs. The swap downloads nothing by
-  itself (the weights come at the next Generate) but it does release the warm model, so
-  it is announced. A preset whose checkpoint still cannot load says which base to pick
-  and where, before explaining why.
+  presets. A preset bundles prompt, styles, size, steps/CFG, **base repo** + checkpoint,
+  transformer and LoRAs, and **Load** switches the model/LoRAs too. Stored in
+  `presets/*.json`. A **basic preset is auto-created for every loadable model** (on
+  startup and when you Refresh the checkpoint list) if it does not exist yet, named after
+  the model, with steps/CFG from its profile. Existing presets are never overwritten;
+  skipped models get none. A single-file checkpoint only swaps the *transformer*, so it
+  is only meaningful under the base repo that provides its VAE and text encoder, which is
+  why the preset records that base and **Load switches to it** when it differs. The swap
+  downloads nothing by itself (the weights come at the next Generate) but it does release
+  the warm model, so it is announced. A preset whose checkpoint cannot load says what to
+  do before explaining why.
 - **Seed**: **♻️ Reuse last seed** (refills the real seed of the previous render) + **Fix
   seed** (no +1 per image). A random `-1` seed is resolved to a concrete value so it is
   actually saved in the metadata.
-- **Advanced tab** — **metadata scheme** (`crispz` / **a1111** for **Civitai** upload
+- **Advanced tab**: **metadata scheme** (`crispz` / **a1111** for **Civitai** upload
   compatibility), **read wildcards in order**, **also save pre-upscale image**, live
   **LoRA-slot count**, and the **Hugging Face token** (gated models).
 - **PNG Info**: drop an image into *Input Image* to read its embedded **prompt + params**
-  (crispz, **A1111/Civitai**, or ComfyUI) — **✨ Apply all** loads everything in one click
-  (prompt, negative, seed, steps, CFG, size, sampler/schedule with A1111-name mapping),
-  or send just the prompt / seed.
-- **AI provenance (EU AI Act art. 50)**: PNG Info also shows a **Provenance** section —
+  (crispz, **A1111/Civitai**, or ComfyUI). **✨ Apply all** loads everything in one click
+  (prompt, negative, seed, steps, CFG, size), or send just the prompt / seed.
+- **AI provenance (EU AI Act art. 50)**: PNG Info also shows a **Provenance** section.
   **C2PA / Content Credentials** manifests are read automatically (Firefly, ChatGPT,
   Gemini outputs carry them; signature state shown), and **🔍 Check invisible watermark**
-  decodes a **TrustMark** watermark on demand (CPU, ~4 s first call then ~0.1 s). Set
+  decodes a **TrustMark** watermark on demand (CPU, about 4 s first call then 0.1 s). Set
   `provenance_watermark: "on"` to embed your own invisible TrustMark id (max 9 ASCII
-  chars, `provenance_wm_id`) in every saved image — survives JPEG/WebP re-encoding.
+  chars, `provenance_wm_id`) in every saved image; it survives JPEG/WebP re-encoding.
   CLI: `--provenance -i img.png`. Both need `trustmark` / `c2pa-python`
   (`requirements-extra.txt`); absence of marks never means "not AI".
-- **Ollama (optional)**: **Describe** (image→prompt, in a **style** you pick), **Improve
-  prompt**, and **Vision Mix** (blend several reference images into one prompt). Models
-  unload from VRAM after use. Without Ollama, **Describe** uses a local BLIP captioner (fully offline); **Improve** (prompt and negative, optional directives) needs Ollama.
+- **Ollama (optional)**: **Describe** (image to prompt, in a **style** you pick),
+  **Improve prompt**, and **Vision Mix** (blend several reference images into one
+  prompt). Models unload from VRAM after use. Without Ollama, **Describe** uses a local
+  BLIP captioner (fully offline); **Improve** (prompt and negative, optional directives)
+  needs Ollama.
 - **Fooocus-style UI**: big contained preview + batch gallery (arrows + fullscreen),
-  prompt + Generate + **Stop**, dark theme, Settings (aspect/performance/batch **1–30**),
-  **277 styles** (search + hover previews), and a **crop editor** on every image input.
+  prompt + Generate + **Stop**, a **live preview** of the image as it forms, dark theme,
+  Settings (aspect/performance/batch **1 to 30**), **277 styles** (search + hover
+  previews), and a **crop editor** on every image input.
 - **Asset Browser** (standalone gallery, new tab): opens **instantly** (indexing +
-  thumbnails in the background, shimmer placeholder → real thumbnail); the thumbnail
+  thumbnails in the background, shimmer placeholder then real thumbnail); the thumbnail
   cache can live on a **fast disk** (`asset_browser.cache_dir`, e.g. `"D:/cache"`) when
-  the output folder is on a slow HDD/NAS — cold-grid loads go from ~1 s to ~3 ms per
-  thumbnail; images save into
-  **`out/YYYY-MM-DD/`** date subfolders; a **subfolder sidebar** with counts + per-folder
-  **hide** + a **Hidden** toggle (persisted), **defaults to today**; **metadata keyword
-  search**, per-image copy/delete, NSFW blur; and **Outputs / LoRAs / Models** source tabs
-  (models show a Civitai preview if one sits next to the `.safetensors`, else a placeholder
-  + trigger words). A **🔎 Fetch from CivitAI** button (per model, in its lightbox) looks the
-  model up by **SHA256** and pulls its **preview + trigger words + example images** (saved as
+  the output folder is on a slow HDD/NAS; images save into **`out/YYYY-MM-DD/`** date
+  subfolders; a **subfolder sidebar** with counts + per-folder **hide** + a **Hidden**
+  toggle (persisted), **defaults to today**; **metadata keyword search**, per-image
+  copy/delete, NSFW blur; and **Outputs / LoRAs / Models** source tabs (models show a
+  Civitai preview if one sits next to the `.safetensors`, else a placeholder + trigger
+  words). A **🔎 Fetch from CivitAI** button (per model, in its lightbox) looks the model
+  up by **SHA256** and pulls its **preview + trigger words + example images** (saved as
   `<name>.preview.png` + `<name>.civitai.json`), plus the **community consensus settings**
-  (median steps/CFG, majority sampler — shown on the model card, and appliable in one click
-  via **📊 Apply CivitAI recommended settings** in Models > Checkpoints). The fetch shows **live progress** (spinner +
-  bar: real `Hashing… %` when the file must be hashed, then Querying / Downloading) with an
-  inline ✅/⚠️ result. **Video examples are accepted too**: the video LoRAs (Wan, LTX…)
-  illustrate themselves with `.mp4` "images" on Civitai — the preview and the search cards
-  take the **first frame** (rendered as a JPEG by the Civitai CDN), and the example viewer
-  **plays the video** (a ▶ badge marks them). **Example images are clickable** → a full-screen viewer shows each
-  example **large with its generation prompt** (Copy prompt) and **← / →** to browse. A small
-  **🖼️ icon** next to each **LoRA** dropdown and the **Klein checkpoint** dropdown
-  (Advanced) opens the Asset Browser **straight to that model's card** (its preview /
-  trigger words / examples). A **🔄 Fetch all missing** button (LoRAs / Models tabs)
-  enriches the whole folder in one go (same as the standalone `civitai_index.bat` /
-  `.sh` — see below); models with a **newer version on CivitAI** get a **⚠ update** badge.
-  The badge only counts versions published for the **same base model**:
-  a LoRA whose page gains an SDXL or Qwen release is not an update for your
-  FLUX.2 copy.
-  A **🖼 Rebuild ALL thumbnails (force)** button re-generates every thumbnail of the
-  current tab from scratch (parallel, live progress) — for when a thumbnail is corrupt or
-  you changed `thumbnail_size`.
-  Plus a per-session history in the app. The **Output folder** can point
-  anywhere (even another drive); a folder typed into the UI at runtime is auto-authorised,
-  so the browser opens without a Gradio *"File not allowed"* error. (In `config.txt`, write
-  Windows paths with `/` or `\\` — a single `\` is an illegal JSON escape.)
+  (median steps/CFG, shown on the model card, and appliable in one click via **📊 Apply
+  CivitAI recommended settings** in Models > Checkpoints; the sampler is never applied,
+  FLUX.3 runs its own schedule). The fetch shows **live progress** (spinner + bar: real
+  `Hashing... %` when the file must be hashed, then Querying / Downloading) with an
+  inline result. **Video examples are accepted too**: the video LoRAs (Wan, LTX...)
+  illustrate themselves with `.mp4` "images" on Civitai; the preview and the search cards
+  take the **first frame**, and the example viewer **plays the video**. **Example images
+  are clickable**: a full-screen viewer shows each example **large with its generation
+  prompt** (Copy prompt) and arrows to browse. A small **🖼️ icon** next to each **LoRA**
+  dropdown and the **Checkpoint** dropdown (Advanced) opens the Asset Browser **straight
+  to that model's card**. A **🔄 Fetch all missing** button (LoRAs / Models tabs) enriches
+  the whole folder in one go (same as the standalone `civitai_index.bat` / `.sh`); models
+  with a **newer version on CivitAI** get an **update** badge, counting only versions
+  published for the **same base model**. A **🖼 Rebuild ALL thumbnails (force)** button
+  re-generates every thumbnail of the current tab from scratch (parallel, live progress).
+  Plus a per-session history in the app. The **Output folder** can point anywhere (even
+  another drive); a folder typed into the UI at runtime is auto-authorised, so the browser
+  opens without a Gradio *"File not allowed"* error. (In `config.txt`, write Windows paths
+  with `/` or `\\`; a single `\` is an illegal JSON escape.)
 - **Metadata saved** with every image: PNG text chunk + EXIF (jpg/webp) + `.json`
-  sidecar — prompt, negative, seed, steps, guidance, size, model, LoRAs, **applied
-  style names**, and the **sampler/schedule**. **Dated, unique filenames** (date +
-  tag + seed + size).
+  sidecar: prompt, negative, seed, steps, guidance, size, model, base repo, LoRAs,
+  **applied style names**. **Dated, unique filenames** (date + tag + seed + size).
 - **`config.txt`** for all defaults + the Ollama instruction strings.
-- **Reference (Omni)** native multi-image compose — **live, up to 4 references**.
-  `Flux2KleinPipeline` takes a list of images, so editing runs in the SAME pipeline
-  as txt2img: no second model, no extra VRAM, no extra download. This is the feature
-  the upstream forks needed a separate 20B model for.
+- **Reference (Omni)** native multi-image compose, **live, 4 slots in the tab, up to 10
+  references through the CLI and the protocol**. FLUX.3 takes a list of reference images
+  and the prompt names them (`<ref_image_0>` is Ref 1), so editing runs in the SAME
+  pipeline as txt2img: no second model, no extra VRAM, no extra download.
 
 Tabbed Gradio UI + scriptable CLI + persistent server (`--serve`).
 
@@ -196,11 +195,11 @@ Tabbed Gradio UI + scriptable CLI + persistent server (`--serve`).
 
 | Script | What it does |
 |---|---|
-| `run.bat` | Standard local launch (127.0.0.1:7860; Gradio takes the next free port if it is busy — the family shares 7860). |
-| `xyz_example.bat` | Ready-to-run **X/Y/Z grid** CLI example (`xyz_example.bat "your prompt"`) — 2×2 Steps × Guidance, prints the sheet path. Unix: `xyz_example.sh`. |
-| `boot_check.bat` | **Smart boot diagnostic**, any GPU (RTX 50xx/40xx/30xx/20xx…): driver, and — the decisive check — whether the installed torch build actually has kernels for your card's `sm_XX`. That is what catches *"RTX 50xx + non-cu128 torch"* (`WinError 127 torch_cuda.dll`) **before** the app crashes, with the exact fix to run. Then reports VRAM and recommends CPU offload / tiling / resolution for *your* card, checks the diffusers pipelines and lists your real model folders (read from `config.txt`, not hardcoded). **Offers GitHub updates first**: an `[UPDATE]` step lists the new commits and asks `Y/N` — no answer in 20 s means N, so the app never updates on its own. It is offered only when the update touches none of your local changes (see below). `--no-run` diagnoses without launching; `--no-update` (or `CRISPZ_NO_UPDATE_CHECK=1`) skips the update step. |
-| `boot_check_lan.bat` / `boot_check_web.bat` | Same diagnostic, then **LAN** (`0.0.0.0`) or **Cloudflare tunnel**. **Set a login first**: `"auth": "user:password"` in `config.txt` (or `--auth` / `CRISPZ_AUTH`) shows a login page and gates every route — without it, anyone with the URL can generate and browse/delete your images (see `SECURITY.md`). |
-| `update.bat` / `update.sh` | **Update after a GitHub pull**: refuses a `git pull` that would touch a file you modified or overwrite a file present outside git (other local changes — `config.txt`, tests, untracked folders — are kept), reinstalls dependencies **only if the requirements file changed**, warns if `torch` was swapped (a transitive resolve can replace a `+cu128` build with a CPU wheel), re-runs the hardware check, verifies the app still imports, and lists **new config keys** added to `config-sample.txt` (your `config.txt` is never overwritten). `--no-pull` / `--force-deps` / `--shared`. |
+| `run.bat` | Standard local launch (127.0.0.1:7860; Gradio takes the next free port if it is busy, the family shares 7860). |
+| `xyz_example.bat` | Ready-to-run **X/Y/Z grid** CLI example (`xyz_example.bat "your prompt"`): 2x2 Steps x Guidance, prints the sheet path. Unix: `xyz_example.sh`. |
+| `boot_check.bat` | **Smart boot diagnostic**, any GPU (RTX 50xx/40xx/30xx/20xx...): driver, and, the decisive check, whether the installed torch build actually has kernels for your card's `sm_XX`. That is what catches *"RTX 50xx + non-cu128 torch"* (`WinError 127 torch_cuda.dll`) **before** the app crashes, with the exact fix to run. Then reports VRAM and recommends CPU offload / tiling / resolution for *your* card, checks the diffusers FLUX.3 blocks and lists your real model folders (read from `config.txt`, not hardcoded). **Offers GitHub updates first**: an `[UPDATE]` step lists the new commits and asks `Y/N`; no answer in 20 s means N, so the app never updates on its own. It is offered only when the update touches none of your local changes (see below). `--no-run` diagnoses without launching; `--no-update` (or `CRISPZ_NO_UPDATE_CHECK=1`) skips the update step. |
+| `boot_check_lan.bat` / `boot_check_web.bat` | Same diagnostic, then **LAN** (`0.0.0.0`) or **Cloudflare tunnel**. **Set a login first**: `"auth": "user:password"` in `config.txt` (or `--auth` / `CRISPZ_AUTH`) shows a login page and gates every route; without it, anyone with the URL can generate and browse/delete your images (see `SECURITY.md`). |
+| `update.bat` / `update.sh` | **Update after a GitHub pull**: refuses a `git pull` that would touch a file you modified or overwrite a file present outside git (other local changes, `config.txt`, tests, untracked folders, are kept), reinstalls dependencies **only if the requirements file changed**, warns if `torch` was swapped (a transitive resolve can replace a `+cu128` build with a CPU wheel), re-runs the hardware check, verifies the FLUX.3 blocks still import, and lists **new config keys** added to `config-sample.txt` (your `config.txt` is never overwritten). `--no-pull` / `--force-deps` / `--shared`. |
 
 They set `GRADIO_SERVER_NAME` / `GRADIO_SERVER_PORT` (Gradio reads them) and call `run.bat`.
 
@@ -210,9 +209,9 @@ commits, it lists up to eight of them and asks `Y/N`; **Y** runs `update.bat` (p
 dependencies only if the lock changed, torch and pipeline checks), then the boot goes on
 with the new version. It offers an update only when it is safe (`_update_check.py`):
 
-- none of the incoming commits touches a file you modified here — git would refuse;
-- none adds a file already present here outside git — git would **overwrite** it without
-  a word if it is ignored, and `tests/` is;
+- none of the incoming commits touches a file you modified here (git would refuse);
+- none adds a file already present here outside git (git would **overwrite** it without
+  a word if it is ignored);
 - your branch has no local commit missing from GitHub.
 
 Otherwise it names the files in the way, starts the app untouched, and you commit or
@@ -220,16 +219,15 @@ stash them before running `update.bat`. Changes elsewhere (`config.txt`, your ow
 a `wildcards/_backup-*` folder) never block: the pull keeps them.
 
 **Cloudflare (private):** the web launcher reads `cloudflare.local.bat` (your tunnel
-name/port) — this file is **gitignored**, never committed. Copy
+name/port); this file is **gitignored**, never committed. Copy
 `cloudflare.local.bat.example` to `cloudflare.local.bat` and fill it in. Leave
 `CF_TUNNEL` empty for an ephemeral `*.trycloudflare.com` quick tunnel (no personal
 config). Needs `cloudflared` (`winget install --id Cloudflare.cloudflared`).
 
-> Roadmap status: **FaceSwap**, **Inpaint/Outpaint** and **Omni multi-reference**
-> all work. The Omni tab needed a separate model on the upstream forks and was kept
-> hidden there for lack of one; on FLUX.2 Klein it is native to the base pipeline, so
-> it is simply on. ControlNet is next (no FLUX.2 Klein ControlNet published yet). See
-> the parent crispz repo for the upscale internals.
+> Roadmap status: **FaceSwap**, **Inpaint/Outpaint** and **Omni multi-reference** all
+> work on FLUX.3. Planned for 0.2 (see FORK.md): BFL's **prompt upsampler** (edits follow
+> a short instruction timidly without it), **bounding boxes** in the Edit tab, the
+> fp8r / nvfp4 measurements. See the parent crispz repo for the upscale internals.
 
 ## Configuration (`config.txt`)
 
@@ -241,20 +239,22 @@ gitignored) and edit that:
 cp config-sample.txt config.txt    # Windows: copy config-sample.txt config.txt
 ```
 
-Load order: `config.txt` → `config-sample.txt` → built-in defaults. See
-**`config_modification_tutorial.txt`** for every key (filename pattern, Ollama
-prompts, the FaceSwap model paths, etc. — the Omni keys of the upstream forks are
-gone: klein edits with the base model).
+Load order: `config.txt`, then `config-sample.txt`, then built-in defaults. See
+**`config_modification_tutorial.txt`** for every key (filename pattern, Ollama prompts,
+the FaceSwap model paths, etc.). The model keys are `flux3_model`, `flux3_transformer`,
+`flux3_precision`, `flux3_base_repos` and `hf_token`; a `config.txt` copied from
+crispz-klein still loads, its `klein_*` keys are simply ignored, and its 4-step `klein`
+profile is skipped for FLUX.3 names with a log line.
 
 ## Styles, Describe & Improve (Ollama)
 
 - **Styles** tab (Advanced): 277 Fooocus/SDXL styles, a **search** box and a
   **thumbnail preview** gallery. Selected styles wrap your prompt and merge their
   negatives. (Sample thumbnails live in `styles/samples/`, local only.)
-- **Describe** (Input Image → Describe): turns an image into a prompt with an Ollama
+- **Describe** (Input Image, Describe): turns an image into a prompt with an Ollama
   **vision** model (detected when the page loads, vision-only list, the last one picked
   is remembered), or with the **caption model** when Ollama is off or fails.
-  **Prompt AI → Describe style** sets what the model is asked for:
+  **Prompt AI, Describe style** sets what the model is asked for:
 
   | Style | For |
   |---|---|
@@ -271,37 +271,39 @@ gone: klein edits with the base model).
   **Length** goes from 60 to 300 words, and the accordion under it shows the exact
   instruction sent. A personal `ollama_describe_prompt` in `config.txt` adds a *Custom
   (config.txt)* style. *Prompt (prose)* is the measured one (2026-09-11, Agents-A1-4B and
-  muse-glimmer, each description regenerated by klein at the same seed): naming the medium
-  first keeps a drawing a drawing, and a quoted text comes back clean only when it is
-  given in one piece; asking for the era (measured 2026-09-12) raised the portrait's
-  fidelity from 0.54 to 0.65 on both models. The other styles follow the same rules. A small vision model
-  (Agents-A1-4B, 3.3 GB) describes in 1-5 s next to the image model; a 28B one
-  (muse-glimmer, ~21 GB) is richer but needs the GPU to itself.
+  muse-glimmer, each description regenerated at the same seed): naming the medium first
+  keeps a drawing a drawing, and a quoted text comes back clean only when it is given in
+  one piece; asking for the era (measured 2026-09-12) raised the portrait's fidelity from
+  0.54 to 0.65 on both models. The other styles follow the same rules. A small vision
+  model (Agents-A1-4B, 3.3 GB) describes in 1-5 s next to the image model; a 28B one
+  (muse-glimmer, about 21 GB) is richer but needs the GPU to itself.
 - **Improve prompt**: rewrites the current prompt richer, same subject and intent, no
   generic filler. The input **format** is detected in code and kept: a tag list stays a
   tag list, prose stays prose (`ollama_improve.format`: auto | tags | prose | off). The
   `{a|b|c}` variant groups and `__wildcards__` are protected; the console says so if a
-  model drops them anyway.
-- **Improve negative** — never on FLUX.2 Klein: the negative prompt has no effect on
-  this distilled model, so the button is hidden.
+  model drops them anyway. On FLUX.3, where the prompt upsampler is not loaded, Improve
+  is the tool that turns a short edit instruction into the full target description the
+  model follows best.
+- **Improve negative**: shown on the base checkpoint only. The negative prompt has no
+  effect on the distilled model, so the button is hidden there.
 - **Directives**: the small **✎** button next to each Improve opens a box for your own
   instructions for ONE rewrite ("more cinematic, under 60 words, in French"); they win
   over the built-in rules and are never saved. The plain Improve button still works in
   one click.
-- **Model**: Advanced → **Prompt AI** → *Improve model* lists **every** installed model
+- **Model**: Advanced, **Prompt AI**, *Improve model* lists **every** installed model
   (a text model is enough). Empty = `ollama_improve.model`, else the first installed
   model.
 - **Without Ollama** Improve does nothing and says why (Ollama stopped, no model, empty
-  answer from a reasoning model) — the text is left untouched.
-- **Config** (`config.txt`): the `ollama_improve` block — `enabled`, `endpoint` (empty =
+  answer from a reasoning model); the text is left untouched.
+- **Config** (`config.txt`): the `ollama_improve` block: `enabled`, `endpoint` (empty =
   the Ollama URL), `model`, `timeout`, `temperature`, `keep_alive` (0 = unload right
   after the answer, the GPU is shared with generation), `positive_instruction`,
   `negative_instruction`, `default_negative`, `format`. A custom `ollama_improve_prompt`
   is still honored. The Ollama transport uses `127.0.0.1` (a `localhost` URL is
   rewritten) and ignores system proxy variables.
 - **Caption model** (Prompt AI): the Describe fallback and the **Auto-describe** toggle
-  in Inpaint / Outpaint. `blip-large` (default, richer) · `blip-base` (lighter), local,
-  downloaded on first use — or `ollama:<model>`, one of your Ollama vision models (listed
+  in Inpaint / Outpaint. `blip-large` (default, richer), `blip-base` (lighter), local,
+  downloaded on first use, or `ollama:<model>`, one of your Ollama vision models (listed
   once Ollama is detected): pick a small one, it runs right before the image model; BLIP
   takes over if Ollama fails. Set by `caption_model` in `config.txt` too.
 - Ollama calls send `ollama_num_ctx` (8192) and cap answers at `ollama_num_predict` (700
@@ -310,72 +312,87 @@ gone: klein edits with the base model).
 
 ## Using a reference image (multi-reference status)
 
-**Available now — img2img.** To guide generation with a reference image, use
-**Input Image → Upscale or img2img** (uncheck "ESRGAN upscale" for a pure
-img2img refine). One reference image + your prompt.
+**Available now: img2img.** To guide generation with a reference image, use
+**Input Image, Upscale or img2img** (uncheck "ESRGAN upscale" for a pure img2img
+refine). One reference image + your prompt. The **strength is a fraction of the
+steps**, diffusers' own rule: 0.35 runs 6 of the 16 steps from the matching point of
+FLUX.3's shifted schedule.
 
-**Available now — Vision Mix.** Input Image → **Vision Mix** tab: drop up to 4
-references, then either *"Vision Mix → prompt"* (fills the prompt) or
-*"Vision Mix & Generate"* (one click: blend + generate). A vision model captions
-each image and the LLM merges them into ONE prompt (e.g. person + outfit +
-setting). Needs Ollama with a real vision model (llava, qwen-vl, …) set in
-Advanced → Prompt AI. The merge instruction is `ollama_compose_prompt`, and
-`ollama_vision_blocklist` hides models that wrongly claim vision — both in
-`config.txt`. Vision Mix blends ideas/style, not exact pixels (that's what the
-true Omni model, kept for later, will do).
+**Available now: Vision Mix.** Input Image, **Vision Mix** tab: drop up to 4
+references, then either *"Vision Mix to prompt"* (fills the prompt) or *"Vision Mix &
+Generate"* (one click: blend + generate). A vision model captions each image and the LLM
+merges them into ONE prompt (e.g. person + outfit + setting). Needs Ollama with a real
+vision model (llava, qwen-vl...) set in Advanced, Prompt AI. The merge instruction is
+`ollama_compose_prompt`, and `ollama_vision_blocklist` hides models that wrongly claim
+vision; both in `config.txt`. Vision Mix blends ideas/style, not exact pixels: that is
+what Reference (Omni) does.
 
-**Multi-reference compose (person + outfit, etc.)** is **native here**, and this is
-the single biggest difference with the rest of the crispz family:
+**Multi-reference compose (person + outfit, etc.)** is **native here**, and this is the
+single biggest difference with the rest of the crispz family:
 
 | Fork | Multi-reference | Cost |
 |---|---|---|
-| crispz-studio (Z-Image) | none — no Omni/Edit model released | — |
-| crispz-krea2 (Krea 2) | none — no instruction-edit pipeline exists | — |
-| crispz-qwen-edit (Qwen-Image) | yes, via a **separate** Qwen-Image-Edit model | a second ~20B model in RAM/VRAM |
-| **crispz-flux3 (FLUX.2 Klein)** | **yes, in the base pipeline** | **zero — same model, same weights** |
+| crispz-studio (Z-Image) | none, no Omni/Edit model released | none |
+| crispz-krea2 (Krea 2) | none, no instruction-edit pipeline exists | none |
+| crispz-qwen-edit (Qwen-Image) | yes, via a **separate** Qwen-Image-Edit model | a second 20B model in RAM/VRAM |
+| **crispz-flux3 (FLUX.3 Image Klein)** | **yes, in the base pipeline** | **zero: same model, same weights** |
 
-`Flux2KleinPipeline.__call__` takes `image` as `list[PIL] | PIL`, so passing several
-references is just another argument. Nothing to configure, nothing to download, no
-second model to keep resident.
+FLUX.3 takes the references as a list of images next to the prompt, so passing several
+is just another argument. Nothing to configure, nothing to download, no second model to
+keep resident.
 
-### Reference (Omni) — always on
+### Reference (Omni), always on
 
-The **Reference (Omni)** tab is **enabled out of the box**. Drop 1 to 4 reference
-images, write an instruction ("put the character from image 1 in the setting of
-image 2", "make it daytime"), Generate. Character identity is preserved while the
-scene changes. It runs like txt2img: **Image number** makes a batch (each image with
-seed + i, variants and wildcards drawn per image), **Upscale after generate** chains
-each image through ESRGAN + refine, and the face / hand **detailer** runs on the final
-image.
+The **Reference (Omni)** tab is **enabled out of the box**. Drop 1 to 4 reference images,
+write the instruction, Generate. **Name the references in the prompt** the way FLUX.3
+was trained: `<ref_image_0>` is Ref 1, `<ref_image_1>` is Ref 2, and so on ("put the
+jacket of `<ref_image_1>` on the person in `<ref_image_0>`"). The output takes the size
+of Ref 1 unless you give one. It runs like txt2img: **Image number** makes a batch (each
+image with seed + i, variants and wildcards drawn per image), **Upscale after generate**
+chains each image through ESRGAN + refine, and the face / hand **detailer** runs on the
+final image. The tab offers 4 slots; the CLI and the `czp` protocol take up to **10**
+references, which is the model's limit.
 
-The upstream `zimage_omni_model` / `zimage_omni_base` config keys are **gone**:
-there is no separate editor to point at. Changing the checkpoint changes the editor
-too, because they are the same model. The "Omni / Edit model" field in
-Models → Omni is kept for API compatibility with the family and is a no-op.
+**Write the target, not the verb.** Measured on the 5090: *"make it daytime, sunny, blue
+sky"* on the rain scene lightens the sky but keeps the rain, and the raw diffusers
+pipeline (official text encoder block, same seed) gives the same pixels: it is the
+model, not the app. FLUX.3 ships with a **prompt upsampler** (a 9B model, about 28 GB)
+whose job is to rewrite such an instruction into a full description of the result; it
+is not loaded in 0.1.0 (it would not fit next to the generator on a 32 GB card) and is
+planned for 0.2. Until then, describe the image you want ("the same woman running, in
+bright daylight under a clear blue sky, dry ground, no rain, ink lines, flat colors") or
+let **Improve prompt** do it.
 
-### What still does not exist for FLUX.2 Klein
+The upstream `zimage_omni_model` / `zimage_omni_base` config keys are **gone**: there is
+no separate editor to point at. Changing the checkpoint changes the editor too, because
+they are the same model. The "Omni / Edit model" field in Models, Omni is kept for API
+compatibility with the family and is a no-op.
+
+### What does not exist for FLUX.3 yet
 
 | Approach | Status |
 |---|---|
-| **ControlNet** | no FLUX.2 Klein ControlNet model published yet |
-| **IP-Adapter** (what Fooocus uses for image prompts on SDXL) | none — and unnecessary, multi-reference is native |
-| **Edit-task LoRAs** | two shipped (`Consistence-Edit` 4B and `Consistence-Edit 9B`, consistency and detail restoration, Apache-2.0). The Qwen-Image-Edit presets of the upstream fork cannot load here and are not advertised; `tools/check_klein_extras.py` watches for new releases |
+| **ControlNet** | no FLUX.3 ControlNet published yet |
+| **IP-Adapter** (what Fooocus uses for image prompts on SDXL) | none, and unnecessary: multi-reference is native |
+| **Edit-task LoRAs** | none published for FLUX.3 yet (the model is weeks old). The catalogue is empty on purpose; a preset you declare in `config.txt` (`edit_loras`) is picked up at once, see below |
+| **Lightning / speed LoRAs** | none; the distilled checkpoint already runs 16 steps, the Edit speed control is hidden until one ships |
+| **Bounding boxes** | the model supports them (a 0-1000 grid per reference); the UI does not expose them yet (0.2) |
 
 ## Job queue
 
 Queue several generations with different settings and run them unattended.
 
 - **`+ Queue`** (under the prompt area) freezes a complete snapshot: every Generate
-  setting **plus the current model state** (checkpoint/transformer, LoRAs + weights,
-  sampler/schedule). Jobs are self-contained — you can change the model afterwards, each
+  setting **plus the current model state** (base repo, precision, checkpoint/transformer,
+  LoRAs + weights). Jobs are self-contained: you can change the model afterwards, each
   job restores its own. The button shows the pending count.
 - **Job queue panel** (accordion): labeled list, select a job, **Up / Down / Remove /
   Clear**, then **`Run queue`** to execute in order (normal progress bar, history and
   file saving as usual).
 - **Stop = pause**: the current job is interrupted, remaining jobs stay queued; press
-  `Run queue` to resume. A failed job logs `[crispz][queue] …` and the queue continues.
+  `Run queue` to resume. A failed job logs `[crispz][queue] ...` and the queue continues.
 - VRAM purge between jobs happens **only** when the model actually changes (the existing
-  model-cache invalidation does the work — zero cost for same-model series).
+  model-cache invalidation does the work: zero cost for same-model series).
 - Config (`config.txt`): `"job_queue": {"enabled": true}`. Set `false` to remove the
   panel entirely (no components created, zero cost).
 - v1 limits: in-memory queue (cleared on page reload), sequential execution.
@@ -385,42 +402,44 @@ Queue several generations with different settings and run them unattended.
 Compare parameter variations side by side on an annotated contact sheet.
 
 1. Open **X/Y/Z grid** (accordion under the Job queue), pick the **X axis** (and
-   optionally Y and Z) and type the values, comma-separated — quotes protect commas
+   optionally Y and Z) and type the values, comma-separated; quotes protect commas
    (`"red, bright", blue`). The field's placeholder adapts to the chosen axis, and the
    **`⤵ suggest`** button pre-fills it (app lists for closed choices, calibration values
-   for numeric axes) — it never overwrites what you already typed.
-2. **Build grid → queue**: every combo becomes a job in the Job queue (validated first:
-   numbers cast, closed lists matched case-insensitively — `uni` resolves to `unipc` —
-   combo count capped by `max_jobs`).
+   for numeric axes); it never overwrites what you already typed.
+2. **Build grid, queue**: every combo becomes a job in the Job queue (validated first:
+   numbers cast, closed lists matched case-insensitively, combo count capped by
+   `max_jobs`).
 3. **Run queue**. When the grid has run, one **annotated sheet per Z value** (X in
    columns, Y in rows, 512 px cells, missing cells drawn as placeholders) is saved under
    `<output>/xyz_<timestamp>/` and appended to the result gallery. Pause/resume keeps the
    collected cells, so the final sheet is complete.
 
-Axes: `Checkpoint`, `Sampler`, `Schedule`, `Steps`, `Guidance`, `Seed`, `ESRGAN model`,
-`Factor`, `Denoise`, `Tile`, `Refine tile`, `LoRA` (swap the file in LoRA slot 1),
-`LoRA + weight` (swap file *and* weight), `LoRA weight` (all active LoRAs),
-`Performance` (applies the preset), `Prompt S/R` (first value = search term, then its
-replacements; the term must exist in the prompt).
+Axes: `Checkpoint`, `Steps`, `Guidance`, `Seed`, `ESRGAN model`, `Factor`, `Denoise`,
+`Tile`, `Refine tile`, `LoRA` (swap the file in LoRA slot 1), `LoRA + weight` (swap file
+*and* weight), `LoRA weight` (all active LoRAs), `Performance` (applies the preset),
+`Prompt S/R` (first value = search term, then its replacements; the term must exist in
+the prompt). The `Sampler` and `Schedule` axes still exist for the family's sake but
+change nothing on FLUX.3 (Euler is its own schedule, see below); `Guidance` only acts
+on the base checkpoint.
 
 **Comparing LoRA epochs.** The `LoRA` axis swaps the *file* in slot 1 while keeping the
-weight you set in the Models panel — what you want when the same LoRA was trained over
+weight you set in the Models panel: what you want when the same LoRA was trained over
 several epochs, or re-uploaded as several CivitAI versions. Hit **`⤵ suggest`** to drop
-the full list of available LoRAs into the field, then delete the ones you don't want to
+the full list of available LoRAs into the field, then delete the ones you do not want to
 compare. Names match like every other closed list: any unambiguous fragment works, so
-`e000020` is enough — an ambiguous or unknown one is rejected at **Build** time, not
+`e000020` is enough; an ambiguous or unknown one is rejected at **Build** time, not
 mid-series. `None` is a valid value for a LoRA-free control cell, and other active slots
 are left untouched. `LoRA + weight` varies both at once, written `name:weight`
-(`ollie_e10:0.6, ollie_e20:0.9`) — the suggest button pre-fills each entry with the
+(`ollie_e10:0.6, ollie_e20:0.9`); the suggest button pre-fills each entry with the
 current weight, so you only edit the numbers. Cell labels show the base name without
 extension, trimmed from the *left* so the `_e000020` suffix that tells your epochs apart
 stays visible.
 
-Config (`config.txt`): `"xyz_grid": {"enabled": true, "max_jobs": 100, "thumb": 512}` —
+Config (`config.txt`): `"xyz_grid": {"enabled": true, "max_jobs": 100, "thumb": 512}`;
 requires `job_queue`; `enabled=false` removes the panel entirely.
 
-Also available from the CLI: `--txt2img --xyz "Steps=4,8,12" --xyz "Guidance=0, 3.5"`
-(see README_CLI.md) — same axes and validation, Ctrl+C assembles a partial sheet.
+Also available from the CLI: `--txt2img --xyz "Steps=8,16,24" --xyz "Denoise=0.3, 0.5"`
+(see README_CLI.md): same axes and validation, Ctrl+C assembles a partial sheet.
 
 ## Variants `{a|b|c}` (prompt and negative)
 
@@ -438,7 +457,7 @@ A prompt can carry *dynamic prompts* variant groups: one option is picked per im
 - **Seed-bound**: same seed, same prompt, same picks. Each image of a batch has its own seed (base + i), so a batch explores the options. A prompt **without** any group makes no random draw: existing prompts and seeds give the same image as before.
 - **In order**: the *Read wildcards in order* checkbox (config `wildcards_in_order`) applies to groups too. Image *i* of the batch takes option *i % n* (with CLI `--xyz`, *i* is the cell number).
 - **Before `__wildcards__`**: groups resolve first, so a placeholder written in an option that is not picked is never read. A wildcard line may itself contain groups.
-- **Negative prompt**: expanded too (its own draw), but it stays inert on FLUX.2 Klein, as before.
+- **Negative prompt**: expanded too (its own draw); it acts on the base checkpoint and stays inert on the distilled one.
 - **Where**: UI **Generate** (txt2img, img2img, Reference (Omni)), the **Inpaint / Outpaint** tab, the **job queue** and the **X/Y/Z grid** (the *Prompt S/R* axis works on the raw text, groups included), the **CLI** (`--prompt`, `--negative`, `--xyz` per cell, `--serve`) and the **`czp` protocol**. A style `{prompt}` placeholder is never taken for a group (a group needs a `|` or a `N$$` prefix).
 - **`<lora:...>` tags** (read by the `czp` protocol) are taken from the expanded text: a tag inside an option only applies when that option is picked.
 - A seed `-1` is resolved to a concrete value **before** expanding (Omni, the Inpaint tab, the CLI and `czp upscale` included), so the picks are replayable and the seed is written to the metadata. The metadata stores the **expanded** prompt.
@@ -449,19 +468,19 @@ A prompt can carry *dynamic prompts* variant groups: one option is picked per im
 Suggestions appear under the caret while typing in the **prompt** and **negative**
 fields (from 2 typed characters in the current comma-delimited token).
 
-- **Keys**: ↑/↓ navigate · **Tab / Enter** insert · **Escape** close · click works too.
+- **Keys**: up/down navigate, **Tab / Enter** insert, **Escape** close; click works too.
   Inserted tags get underscores replaced by spaces; `__wildcard__` entries are kept
   verbatim.
 - **Sources**: the CSVs in `tag_autocomplete.sources` are downloaded **once** into
   `tags/` (atomic, with console progress). Drop any extra `.csv` in `tags/` to add a
-  source — rich format `name,category,count,"alias1,alias2"` or one word per line.
+  source: rich format `name,category,count,"alias1,alias2"` or one word per line.
   Your **wildcards** are merged in as `__name__` entries with top priority. Aliases
   match too (shown alongside the tag).
 - **Performance**: the index is built once in the browser (popularity sort, dedup,
   2-char prefix buckets, early exit at `max_results`). Timings are logged in the
   browser console: `[tagac] ready in N ms` and a rolling per-keystroke average.
 - Config (`config.txt`):
-  `"tag_autocomplete": {"enabled": true, "max_results": 8, "sources": [<urls>]}` —
+  `"tag_autocomplete": {"enabled": true, "max_results": 8, "sources": [<urls>]}`;
   `enabled=false` downloads nothing and injects no script (zero cost).
 
 ## Inpaint / Outpaint (Advanced tab)
@@ -469,33 +488,41 @@ fields (from 2 typed characters in the current comma-delimited token).
 One tab with three modes. The image editor, prompt, **Steps** (from the model
 Performance) and **Strength** are shared across modes:
 
-- **Brush (inpaint)** — paint a mask over the area to change, describe the result in the
+- **Brush (inpaint)**: paint a mask over the area to change, describe the result in the
   prompt, run. Brush size is set from the editor toolbar (click the brush icon).
-- **Expand sides (outpaint)** — check **Left / Right / Top / Bottom** (or **Center** for
-  all four) to grow the canvas ~30% per side; the model fills the new borders.
-- **Reframe (ratio)** — pick a target aspect ratio + **Contain** (keep the whole image
+- **Expand sides (outpaint)**: check **Left / Right / Top / Bottom** (or **Center** for
+  all four) to grow the canvas about 30% per side; the model fills the new borders.
+- **Reframe (ratio)**: pick a target aspect ratio + **Contain** (keep the whole image
   and fill the borders) or **Cover** (crop to fill).
 
-All modes are bounded to the model's **~1 MP sweet spot** (no pixel blow-up). Border
+All modes are bounded to the model's **1 MP sweet spot** (no pixel blow-up). Border
 fills use a **blurred-edge init + feathered seams** so new content matches the original's
-colors, and the unmasked area keeps its full resolution.
+colors, and the unmasked area keeps its full resolution, pixel for pixel: the model
+denoises the whole canvas and, at every step, the tokens outside the mask are put back
+to the original (FLUX.3 has no inpaint pipeline of its own; this blending lives in
+`cz_flux3.py`), then the result is composited over the source.
 
-Tips for clean outpaint/reframe:
+Tips for clean inpaint / outpaint / reframe:
 
-- **Describe the result** in the prompt (the full outfit/scene). **Auto-describe** runs
-  automatically when the prompt is empty (the caption model: local BLIP, or an Ollama
-  vision model) to keep the fill coherent with the center — or check it to also prepend a
-  description to your prompt.
-- **Strength** ~0.65–0.8 blends best (keeps the edge colors); ~1.0 adds more new detail
-  but a more visible transition.
+- **Describe the whole scene, not the patch.** Measured on the 5090: *"a large full
+  moon behind heavy clouds"* on its own painted nothing into the masked corner of the
+  rain scene; *"a comic book panel, a woman with red hair running in the rain at night,
+  a large bright full moon behind heavy clouds in the top right corner, ink lines, flat
+  colors"* painted the moon, seamlessly. The model sees the entire image and makes it
+  coherent with the prompt; a prompt that describes only the patch describes an image it
+  cannot produce. **Auto-describe** runs automatically when the prompt is empty (the
+  caption model: local BLIP, or an Ollama vision model) to give it that scene, or check
+  it to also prepend a description to your prompt.
+- **Strength** 0.65 to 0.8 blends best (keeps the edge colors); 1.0 adds more new detail
+  but a more visible transition. The strength is a fraction of the steps.
 - **Harmonize** (checkbox) runs a light final img2img refine over the whole result to
   unify grain/light and remove any remaining "added zone" look.
-- The caption model is set in **Prompt AI → Caption model** (`blip-large` /
+- The caption model is set in **Prompt AI, Caption model** (`blip-large` /
   `blip-base`, or `ollama:<model>`).
 
-## Face Swap — post-process  *(Phase 3, optional)*
+## Face Swap, post-process  *(Phase 3, optional)*
 
-Input Image → **Face Swap** tab: a source face + “Apply face swap to result”.
+Input Image, **Face Swap** tab: a source face + "Apply face swap to result".
 Works on any mode (txt2img / img2img / omni). The installer sets up the deps by
 default (`insightface` + `onnxruntime-gpu`); skip with `install.bat --no-faceswap`,
 or install manually:
@@ -519,37 +546,37 @@ inswapper produces a **128 px** face and insightface pastes it back through a pl
 **rectangle**. That rectangle is blind to what is in front of the face: a hand, food,
 a microphone or a strand of hair falling over the mouth gets painted over by the
 generated pixels. crispz-flux3 therefore does its own compositing, with four passes
-you can toggle under *Face Swap → Blending quality* (all on by default):
+you can toggle under *Face Swap, Blending quality* (all on by default):
 
 | Setting | What it fixes | Model (auto-downloaded) |
 |---|---|---|
 | **Occlusion mask** | objects *in front of* the face are preserved | `dfl_xseg.onnx` |
 | **Face-region mask** | no bleed onto hair, neck, clothes, background | `bisenet_resnet_34.onnx` |
-| **Colour match** | skin tone / exposure differences between source and target | — |
+| **Colour match** | skin tone / exposure differences between source and target | none |
 | **Restore** | the soft 128 px swap, re-synthesised at 512 | `codeformer.onnx` or `gfpgan_1.4.onnx` |
 
 The occlusion mask is the important one: without it, any shot where something touches
 the face comes out broken around the mouth. Each model is fetched once into `faceswap/`
 and can be pointed elsewhere via `faceswap_occluder_path` / `faceswap_parser_path` /
-`faceswap_codeformer_path`. If one is unavailable the pass is skipped with a log line —
+`faceswap_codeformer_path`. If one is unavailable the pass is skipped with a log line;
 the swap still runs. Total cost is about **90 ms per face** on GPU.
 
 The enhancer is `codeformer` by default (`faceswap_restore_model`); its
 `faceswap_restore_fidelity` goes from 0 (maximum detail, more generative) to 1 (maximum
-fidelity to the swapped pixels) — 0.5–0.7 suits a 128 px swap. GFPGAN ignores it.
+fidelity to the swapped pixels); 0.5 to 0.7 suits a 128 px swap. GFPGAN ignores it.
 
-> **Not the same thing as Fooocus's “FaceSwap”.** Fooocus conditions the *diffusion*
+> **Not the same thing as Fooocus's "FaceSwap".** Fooocus conditions the *diffusion*
 > on a face embedding (IP-Adapter face), so the whole image is generated coherently and
-> occlusion can never break — but the identity is only approximate, and it cannot be
+> occlusion can never break, but the identity is only approximate, and it cannot be
 > applied to an existing image. The swap here transfers the *exact* face as a
 > post-process. Different trade-offs, not a better/worse pair.
 
 ### Where the swap runs, and what it replaces
 
 The swap is the **last** step of a render. The order is: generation (txt2img, img2img
-or Reference (Omni)) → **Upscale after generate** → face / hand **detailer** → **face
-swap**. It runs on every image of a batch, and each swapped image is saved as its own
-file, tagged `faceswap`. Two consequences:
+or Reference (Omni)), then **Upscale after generate**, then the face / hand
+**detailer**, then the **face swap**. It runs on every image of a batch, and each
+swapped image is saved as its own file, tagged `faceswap`. Two consequences:
 
 - **Turn the face detailer off when the swap is on.** The detailer re-renders faces at
   a larger size, then the swap replaces them anyway: the time is spent for nothing, and
@@ -572,58 +599,42 @@ you set `faceswap_model_url`.
 ## Try-on and casting: Reference (Omni) + face swap
 
 Reference (Omni) can dress a person with a garment from a product shot, and even
-change the head, in one edit. The face swap then puts the exact face back. What
-follows was measured on 2026-09-19 on FLUX.2-klein-9B (`model` offload, 4 steps, two
-seeds per setting).
+change the head, in one edit. The face swap then puts the exact face back. The method
+below was worked out on the previous engine (the measurements are in FORK-klein.md) and
+carries over; the FLUX.3 figures are still to be taken.
 
-**The method.** Put the person in **Ref 1**: that image sets the pose, the framing,
-the background and the light, and the output keeps its aspect ratio. Put the garment
-in **Ref 2** (and a second view of it in **Ref 3** if you have one), the head to use in
-the next slot. In the prompt, name each image by its number **and** say what to take
-from it: "the woman in image 1 keeps her exact pose..., she now wears the dress from
-images 2 and 3: <short description of the dress>... her head is the head of the woman
-in image 4: <hair, eyes>". Numbers count **filled** slots only: fill them in order, an
-empty Ref 2 turns Ref 3 into "image 2". A short description of the garment (colour,
-pattern, collar, sleeves, hem) anchors the transfer. For a sheer garment, say what is
-worn under it ("worn over a matching slip"), or the render may show the body through
-it.
+**The method.** Put the person in **Ref 1** (`<ref_image_0>`): that image sets the
+pose, the framing, the background and the light, and the output keeps its aspect ratio.
+Put the garment in **Ref 2** (`<ref_image_1>`, and a second view of it in **Ref 3** if
+you have one), the head to use in the next slot. In the prompt, name each reference by
+its tag **and** say what to take from it: "the woman in `<ref_image_0>` keeps her exact
+pose..., she now wears the dress from `<ref_image_1>` and `<ref_image_2>`: <short
+description of the dress>... her head is the head of the woman in `<ref_image_3>`:
+<hair, eyes>". Tags count **filled** slots only: fill them in order, an empty Ref 2
+turns Ref 3 into `<ref_image_1>`. A short description of the garment (colour, pattern,
+collar, sleeves, hem) anchors the transfer. For a sheer garment, say what is worn under
+it ("worn over a matching slip"), or the render may show the body through it.
 
-**What the consistency LoRA does.** Without one, the edit drifts: the subject comes
-back slightly zoomed or shifted, and the face is redrawn. The **Consistence-Edit**
-presets (4B, and **Consistence-Edit 9B** for the 9B) hold the framing and the features
-of image 1, and they did **not** block the change of clothing, even at 1.0:
-
-| Test | No LoRA | Consistence-Edit 9B 0.3 | 0.6 | 1.0 |
-|---|---|---|---|---|
-| Hoodie on a waist-up portrait: head SSIM vs image 1 | 0.91 | 0.95 | 0.97 | 0.98 |
-| Designer dress on a full-body studio photo: face SSIM vs image 1 | 0.47-0.55 | 0.49-0.58 | 0.52-0.61 | 0.58-0.63 |
-
-The garment came through in every setting: print and lettering legible, colours,
-collar, ruffles, bows, even a small doll sewn at the hip of a complex dress. Two
-community consistency LoRAs for the 9B, set in a regular LoRA slot at 0.6, behaved like
-the preset at 0.8-1.0; on a dancing pose, one of them kept the movement best. **Start
-with the preset at 0.6 and go up to 1.0** when the framing must not move; lower it if an
-edit refuses to take.
+**Consistency.** No edit-task LoRA exists for FLUX.3 yet, so there is no consistency
+preset to lean on: the framing is held by the prompt ("keeps her exact pose and
+framing") and by describing the target image in full rather than issuing a verb.
 
 **The limit is the face in a full-body shot.** Omni renders at about one megapixel
-(832x1248 for a 2:3 image) whatever the size of image 1: in a full-body shot the face
-is about 100 px high, and klein redraws it younger and rounder. The LoRA helps a little
-(table above), it does not fix it. The **face swap** does: with the portrait as the
-source, the face comes back to the person's features while keeping the expression of
-the render. Enlarging image 1 does not help (the output stays at one megapixel):
-**Upscale after generate** gives the final definition.
+whatever the size of Ref 1: in a full-body shot the face is about 100 px high and gets
+redrawn. The **face swap** fixes it: with the portrait as the source, the face comes
+back to the person's features while keeping the expression of the render. Enlarging
+Ref 1 does not help (the output stays at one megapixel): **Upscale after generate**
+gives the final definition.
 
 **Recipe for a casting** (person, garment in two views, another person's head):
 
-1. Model **klein-9B**, tab **Reference (Omni)**: Ref 1 = full-body photo, Ref 2 =
-   garment front, Ref 3 = garment side, Ref 4 = portrait.
-2. **Edit LoRA presets**: Consistence-Edit 9B at 0.6 to 1.0 (or a consistency LoRA of
-   your own in a LoRA slot).
-3. Prompt as above, keeping "the joyful expression of image 1" (or whatever the pose
-   calls for) so the swapped face does not look pasted on a different mood.
-4. **Image number** 4, then keep the best.
-5. **Upscale after generate** on: ESRGAN x2, Refine off.
-6. Face **detailer off**; **Apply face swap to result** on, with the portrait as the
+1. Tab **Reference (Omni)**: Ref 1 = full-body photo, Ref 2 = garment front, Ref 3 =
+   garment side, Ref 4 = portrait.
+2. Prompt as above, keeping "the joyful expression of `<ref_image_0>`" (or whatever the
+   pose calls for) so the swapped face does not look pasted on a different mood.
+3. **Image number** 4, then keep the best.
+4. **Upscale after generate** on: ESRGAN x2, Refine off.
+5. Face **detailer off**; **Apply face swap to result** on, with the portrait as the
    source face.
 
 ## Text -> Image
@@ -631,7 +642,7 @@ the render. Enlarging image 1 does not help (the output stays at one megapixel):
 ```bash
 # Generate only
 python app.py --txt2img --prompt "a serene mountain lake, cinematic" \
-    --gen-width 1024 --gen-height 1024 --gen-steps 8 --seed 42 \
+    --gen-width 1024 --gen-height 1024 --gen-steps 16 --seed 42 \
     --save-mode local --output-dir out
 
 # Generate then upscale (ESRGAN + diffusion refine)
@@ -640,355 +651,182 @@ python app.py --txt2img --prompt "portrait of an old fisherman" --upscale \
     --save-mode local --output-dir out
 ```
 
-In the UI, use the **Text -> Image** tab. FLUX.2 Klein is distilled: **4 steps**, and
-the guidance value is irrelevant (see below).
+In the UI, use the **Text -> Image** tab. The distilled checkpoint runs **16 steps** and
+ignores the guidance value; the base checkpoint wants about 50 steps and a CFG of 3.5
+(the Performance presets carry both).
 
-## Civitai / single-file FLUX.2 checkpoint
+### Guidance and negative prompt: it depends on the checkpoint
 
-```bash
-# Pass a .safetensors directly as the model (treated as the transformer)
-python app.py --txt2img --prompt "..." \
-    --klein-model "D:/models/flux2_klein_civitai.safetensors"
+The **distilled** repo is a *flow map*: every step hands the transformer the next
+timestep as well, there is no unconditional branch to turn on, so `guidance_scale` and
+the negative prompt change nothing. The app passes 1.0 and says once in the console
+when you raised the slider. The **base** repo is a regular flow-matching model with a
+real classifier-free guidance: the slider is a CFG (3.5 advised), the negative prompt
+works, and **Improve negative** appears.
 
-# Or keep an HF/diffusers base and override only the transformer
-python app.py --klein-transformer "D:/models/flux2_klein_civitai.safetensors" ...
-```
-
-The single-file is loaded as the **transformer**; the **VAE + the Qwen3 text encoder**
-still come from the base repo. **BF16/FP16, GGUF (kept quantized in VRAM) and ComfyUI
-FP8/INT8 "scaled" builds (dequantized to bf16 at load) are all supported**; only
-misfiled LoRAs, SVDQuant/Nunchaku INT4 and foreign-architecture files are refused.
-
-### Guidance: there isn't any
-
-FLUX.2 Klein is **step-wise distilled**. diffusers drops `guidance_scale` for such
-models, and the `Flux2Klein*` pipelines expose **no `negative_prompt` at all** (only
-`negative_prompt_embeds`, which is useless without CFG).
-
-This is measured, not assumed — `tests/test_klein_guidance.py` renders the same seed
-at guidance 1.0 / 4.0 / 8.0 and the images come back **bit-identical** (MAE 0.0000):
-
-```bash
-.venv/Scripts/python tests/test_klein_guidance.py
-```
-
-| Control | Effect on klein |
-|---|---|
-| **CFG guidance** slider / `--guidance` | none — kept for API compatibility |
-| **Negative prompt** | none — the pipeline has no such argument |
-| **Steps** | the one that matters: **4** (8 buys very little) |
-
-The CLI protocol says so honestly: `caps` reports `supports.negative: false`, and a
-spec carrying `negative` or `guidance` comes back with a `warnings` entry rather than
-silently pretending. Sampler/schedule still apply: CLI `--sampler`, `--schedule`.
-
-## Switching models in the UI (Advanced → Models)
-
-The **Klein checkpoint** dropdown is the single place to switch model. It merges,
-in one list:
-
-- the official base repo **`black-forest-labs/FLUX.2-klein-4B`** (pulled from Hugging
-  Face on first use), then
-- every single-file `.safetensors` found in your **Checkpoints folder** **and** the
-  optional **Extra checkpoints folder** (both merged into the same list).
-
-What each choice does:
-
-| You pick… | Effect | Performance preset (auto) |
+| Control | Distilled (default) | Base |
 |---|---|---|
-| **black-forest-labs/FLUX.2-klein-4B** | full base repo, the default (Apache 2.0, distilled) | from the model profile |
-| **black-forest-labs/FLUX.2-klein-9B** | full base repo — bigger, **non-commercial**, gated, ~29 GB VRAM | from the model profile |
-| a local `.safetensors` | used as the **transformer** (VAE + Qwen3 encoder kept from the current base repo) | from the model profile |
+| **CFG guidance** slider / `--guidance` | none, kept for API compatibility | a real CFG, 3.5 advised |
+| **Negative prompt** | none | works |
+| **Steps** | **16** (8 as a draft mode, to be measured) | about **50** |
+| **Sampler / Schedule** | Euler / sgm_uniform only (greyed out) | the same |
 
-Picking a **base repo** swaps everything — transformer, VAE and Qwen3 text encoder —
-so it also changes which single-file checkpoints can load: a 9B build does not fit a
-4B pipeline and vice versa. The dropdown is rebuilt on the spot, the missing model
-presets are created, and the choice is written to `preferences.json` so the next
-launch starts on it. A checkpoint the list refuses is **refused on selection**, with
-the reason, instead of failing mid-run on `expected shape [18432, 3072], but got
-[24576, 4096]`.
+The sampler menus are greyed out on purpose: FLUX.3 runs its native FlowMatch Euler
+schedule with a constant shift of 6.93, and a multistep sampler or a remapped schedule
+would feed the distilled flow map jumps it was never trained on. The CLI protocol says
+all of this honestly: `caps` reports `supports.negative` for the loaded checkpoint, and a
+spec carrying an inert `negative` or `guidance` comes back with a `warnings` entry
+rather than silently pretending.
 
-### Enabling the 9B — the Hugging Face part
+## Single-file FLUX.3 checkpoints (Civitai, GGUF, BFL quantized)
 
-The 4B is public: nothing to do. The **9B is gated**, so the Hub will refuse it
-until two things line up — and they are two *different* things, which is where the
-time gets lost.
+```bash
+# Pass a .safetensors or .gguf directly as the model (used as the transformer)
+python app.py --txt2img --prompt "..." \
+    --flux3-model "D:/models/flux3-image-klein-Q8_0.gguf"
 
-**1. Accept the licence**, at
-<https://huggingface.co/black-forest-labs/FLUX.2-klein-9B> (the button under the
-title). It is `gated: auto` — no queue, no human review, it takes effect at once.
-Accept it on the **exact** repo: `-9b-fp8`, `-9b-kv`, `-base-9B` and the rest each
-have their own gate, and accepting one does not open another.
-
-**2. Give the app a token from that same account.** Either:
-
-```bat
-huggingface-cli login          REM read token, picked up without restarting the app
+# Or keep the HF base repo and override only the transformer
+python app.py --flux3-transformer "D:/models/flux3_finetune.safetensors" ...
 ```
 
-or `"hf_token": "hf_..."` in `config.txt` (read at import → restart), or the field
-in **Advanced → Models** (applied immediately and persisted).
+The single file is loaded as the **transformer**; the **VAE and the Qwen3-VL text
+encoder** still come from the base repo, so the gated repo is needed even then.
+Supported: `.safetensors` in the **BFL**, **ComfyUI** or **diffusers** layout (diffusers
+0.42 converts the keys), BFL's **fp8r / nvfp4** pre-quantized files (kept quantized), and
+**GGUF** quants such as `unsloth/flux-3-image-klein-GGUF` (kept quantized in VRAM; a
+GGUF forces CPU offload `model`, the only mode that puts a quantized model on the GPU).
+The ComfyUI "scaled" FP8 dequantizer of the previous engine is not ported: FLUX.3 ships
+its own fp8r build, and such a file would be handed to diffusers as is, with a log line.
 
-> **The trap: the account that accepted the licence must be the account the token
-> belongs to.** A token that works everywhere else — it pulls the 4B fine — still
-> gets a `403 GatedRepoError` on the 9B if the licence was accepted while your
-> browser was logged in as someone else. The error looks identical to "licence not
-> accepted", so check who the app actually is:
->
-> ```bat
-> huggingface-cli whoami
-> ```
+**What is refused, and why it is refused early.** FLUX.3 Image Klein has the same hidden
+width (3072) as FLUX.2-klein-4B, so a check on the tensor shapes would wave a FLUX.2
+file through and let it die gigabytes later inside `load_state_dict`. The app reads the
+model **family** off the tensor names instead (`early_stream_modulations`,
+`mode_blocks`... against `double_blocks`, `single_stream_modulation`...), for
+checkpoints and LoRAs alike, header only. A FLUX.2 file is refused with one sentence,
+"it runs in crispz-klein", counted once per listing rather than once per file; a stray
+LoRA in the checkpoints folder and files of another architecture are skipped with their
+reason in the console.
 
-If the Hub refuses, the app does not hand you a `huggingface_hub` traceback: it
-says the repo is gated, links the page to accept, and tells you whether a token is
-being sent at all — so you know which of the two halves is missing.
+## Switching models in the UI (Advanced, Models)
 
-**Then pick the 9B in the dropdown.** Selecting a base repo also re-reads its
-dimension, so a licence accepted *after* a failed attempt takes effect on the next
-selection rather than at the next restart.
+**Models > Checkpoints** holds three controls:
 
-**What lands on disk:** ~35 GB — transformer 18.2 GB + Qwen3 8B text encoder
-16.4 GB + VAE. The repo itself totals 52.9 GB, but the extra 18.2 GB is
-`flux-2-klein-9b.safetensors` at the root, the single-file build, which
-`from_pretrained` does not fetch.
+| Control | Choices | What it changes |
+|---|---|---|
+| **FLUX.3 checkpoint** | Distilled / Base | the whole base repo: transformer, VAE and encoder are reloaded; steps and CFG follow the profile (16 / 1.0 or 50 / 3.5) |
+| **Precision** | bf16 / fp8r / nvfp4 | which build of the official transformer is downloaded and run; only the transformer is swapped on the next run (VAE and encoder stay in VRAM); ignored while a single file is picked |
+| **Checkpoint** | the current base repo, then your single files | a single file replaces the transformer only |
 
-**Making the 9B usable on a 32 GB card.** The full bf16 base — transformer 18.2 GB +
-Qwen3-8B encoder 15.3 GB — does not fit in 31.8 GB, so the offload is forced to `model`.
-Re-measured 2026-09-09 on an RTX 5090, 1024x1024, 4 steps, same prompt, encoder trimmed:
+| Precision | Download | Who runs it |
+|---|---|---|
+| **bf16** | `transformer/`, about 11 GB | every card; whole in VRAM from 24 GB (18.8 GB resident measured) |
+| **fp8r** | `variants/fp8r/`, about 6.3 GB | fast from compute capability 8.9 (RTX 40xx / 50xx); it still runs below, dequantized per layer |
+| **nvfp4** | `variants/nvfp4/`, about 5.3 GB | RTX 50xx (Blackwell) with the `flashinfer` package; elsewhere the load fails with its reason |
 
-| | load | first image | steady state | peak VRAM |
-|---|---|---|---|---|
-| bf16 base | ~25 s | ~35 s | **6.4–9.1 s** | 17.7 GB |
-| GGUF override (Q8_0, 9.1 GB) | ~83 s | ~19 s | **6.0 s** | 14.4 GB |
+Picking a base repo swaps everything and says, before the first run, what the repo
+costs: the licence, the gated access, the VRAM. The choice is written to
+`preferences.json` (`flux3_model`, `flux3_precision`) so the next launch starts on it. A
+checkpoint the list refuses is **refused on selection**, with the reason, instead of
+failing mid-run.
 
-An earlier edition of this page said **50 s** for the bf16 base and sold GGUF as the
-cure at 10.9 s. Both numbers are gone: 50 s is what the **first** image costs today, not
-what every image costs — the figure conflated loading with running, the exact mistake
-`bench_models.bat` exists to prevent. Two consecutive images vary by as much as the two
-configurations differ from each other, so do not read a 13 % gap as a verdict.
-
-GGUF still earns its place, just not where the old text claimed: **3.3 GB less peak
-VRAM** and a first image roughly twice as quick. It costs 83 s to load, so it pays on a
-long session with one model, not on a grid that switches checkpoints.
-
-`.safetensors` fp8/int8 builds do **not** help here: they are the ComfyUI "scaled"
-format, and the loader dequantizes them to bf16 — 8.8 GB on disk, ~18 GB in VRAM again.
-They save disk, not memory. Only GGUF stays quantized at run time.
-
-**Pre-loading the dequant, once.** That conversion is not free: the first load of an
-fp8/int8 checkpoint reads and rewrites the whole file — minutes, in the middle of a
-session. The bf16 result lands in `cache/dequant`, and the next loads of that same
-file become a plain single-file read (seconds). `rebuild_cache.bat --list` shows what
-would be converted, what each entry weighs once expanded (~17 GB for a klein-9B
-transformer, ~7 GB for a 4B) and whether `dequant_cache_max_gb` covers the total —
-if it does not, the last conversions evict the first ones and the cache buys nothing.
-Without `--list` it converts, and it resumes: anything already cached is skipped in a
-second. Both variants are pre-filled whatever base you currently run, so switching
-4B ↔ 9B never repays the conversion. Deleting `cache/dequant` is always safe.
-
-### LyCORIS LoKr
-
-A LoKr is not a LoRA: its update is a Kronecker product, `dW = w1 (x) w2`, and
-neither peft nor diffusers can apply one — there is not a single occurrence of
-`lokr` in `loaders/lora_conversion_utils.py`. It is supported here by **merging it
-into the weights** at load: drop it in the LoRA folder and pick it in *Models >
-LoRA* like any other.
-
-Why a merge rather than an adapter: on FLUX.2 the q/k/v projection is **fused** in the
-checkpoint (one `[3d, d]` matrix) and **split** in diffusers (three `[d, d]`). A
-Kronecker product does not cut into three — on SNOFS, `w1` is `[4, 4]` and `w2`
-`[3072, 1024]`, so its blocks are 3072 rows tall where the split falls at 4096. The
-materialized delta cuts like any other matrix. Key conversion goes through diffusers'
-own Flux2 converter, the one `from_single_file` uses, so it cannot drift from how the
-model itself is loaded — and anything that fails to find its target is reported, never
-dropped quietly.
-
-The scale follows LyCORIS: no scalar at all when `w1` and `w2` are full (there is no
-rank), `alpha / rank` otherwise. ai-toolkit writes `alpha = lora_dim` in the full case
-(1e10 on SNOFS), so both conventions agree on 1.0.
-
-**The trade-off, stated plainly:** a merge is not an adapter. Changing which LoKr is
-selected, or its weight, reloads the transformer — the app detects it and says so —
-where a PEFT LoRA is swapped in place. LoHa is *not* supported and is refused by name.
-
-**A local 9B `.safetensors` does not spare you the gated repo either.** A single-file
-checkpoint only replaces the *transformer*; the VAE, the text encoder and the
-architecture config still come from the gated base repo. An fp8 or GGUF 9B build
-saves VRAM, not the licence.
-
-Set `klein_base_repos` to the 4B alone in `config.txt` if you never want the 9B
-offered in the first place.
-
-Switching the dropdown automatically syncs **steps, guidance and the Performance
-radio**. The change is applied on the next **Generate**.
-
-**Switching between two `.safetensors` (or clearing an override) reloads only the
-transformer** — the VAE, the Qwen3 text encoder and the tokenizer stay in VRAM, so it
-takes seconds instead of a full reload. Only picking a **different base repo** reloads
-everything (its VAE/encoder genuinely differ). Same for LoRAs: they are hot-swapped, and
-changing just a weight is instant.
+**Switching between two single files (or clearing an override) reloads only the
+transformer**: the VAE, the Qwen3-VL encoder and the tokenizer stay in VRAM, so it takes
+seconds instead of a full reload. Only picking a **different base repo** reloads
+everything. Same for LoRAs: they are hot-swapped, and changing just a weight is instant.
 
 Steps:
 
-1. **Models → Checkpoints folder** (and, if you keep models elsewhere, **Extra
-   checkpoints folder**) → **Refresh**. Both folders feed the single dropdown.
-2. Pick an entry in **Klein checkpoint** — the base repo or a local file.
-3. **Generate** → it loads with your selection.
+1. **Models, Checkpoints folder** (and, if you keep models elsewhere, **Extra
+   checkpoints folder**), **Refresh**. Both folders feed the single dropdown.
+2. Pick an entry in **Checkpoint**: the base repo or a local file.
+3. **Generate**: it loads with your selection.
 
-### Community full-repo models
-
-Some community models ship as a **full diffusers repo** but with an **incomplete
-tokenizer** (only `tokenizer.json`), so loading them as the **base** fails. Load
-just their **transformer** instead and keep the base components:
-
-1. **Models → "Transformer override (HF repo / diffusers folder)"** = the repo →
-   **Apply**.
-2. Keep the **Klein checkpoint** dropdown on `black-forest-labs/FLUX.2-klein-4B`
-   (provides VAE + Qwen3 encoder + tokenizer).
-3. **Generate** (downloads the transformer once, ~7 GB).
-
-CLI equivalent: `--klein-transformer <repo-or-folder>`.
-
-> FLUX.2 Klein is recent, so the community fine-tune scene is still thin. The
-> loading path is the one inherited from the Qwen fork and it is **tested** — a
-> 7.2 GB single-file `.safetensors` loads and renders — but expect few models to
-> point it at for now.
-
-**Gotchas**
-
-- **BF16/FP16, GGUF and ComfyUI FP8/INT8 "scaled" checkpoints all load** (GGUF stays
-  quantized in VRAM; FP8/INT8 are dequantized to bf16 in RAM — at 4B that is ~8 GB,
-  not the ~38 GB the 20B forks had to warn about).
-  Only misfiled **LoRAs**, **SVDQuant/Nunchaku INT4** and foreign-architecture files are
-  auto-hidden from the list (a `checkpoint skipped (...)` line is logged). The
-  architecture guard looks for the real FLUX.2 key markers
-  (`single_transformer_blocks`, `x_embedder`, `context_embedder`, …).
-- Don't bother tuning guidance for a checkpoint — it is inert (see above). Steps are
-  the only knob: 4.
-- Verify what loaded with `run.bat --debug`:
-  `[crispz] loading Klein transformer (single-file): …`.
-
-**Persist the folders** (so you don't re-type them) in `config.txt`:
+**Persist the folders** (so you do not re-type them) in `config.txt`:
 
 ```json
-"checkpoints_dir": "C:\\path\\to\\models\\Stable-diffusion\\FLUX2",
+"checkpoints_dir": "C:\\path\\to\\models\\FLUX3",
 "checkpoints_extra_dir": "",
 "loras_dir": "C:\\path\\to\\models\\Lora"
 ```
 
-### Text encoder (swap)
+### Community full-repo models
 
-**Models → Checkpoints → Text encoder** replaces the base repo's own Qwen3 text encoder,
-for instance with an *abliterated* Qwen3 of the same size. Only the encoder changes: the
-tokenizer, the VAE and the transformer stay the base repo's, and the encoder is trimmed
-like the stock one.
+Some community models ship as a **full diffusers repo** but with an **incomplete
+tokenizer**, so loading them as the **base** fails. Load just their **transformer**
+instead and keep the base components:
 
-**Which encoder fits.** It must have the shape of the base repo's own encoder:
+1. **Models, "Transformer override (HF repo / diffusers folder)"** = the repo,
+   **Apply**.
+2. Keep the **FLUX.3 checkpoint** selector on the official repo (it provides the VAE,
+   the Qwen3-VL encoder and the tokenizer).
+3. **Generate** (downloads the transformer once, about 11 GB in bf16).
 
-| Base (and its checkpoints) | Encoder it takes |
-|---|---|
-| FLUX.2-klein-4B | a Qwen3-4B: `qwen3`, hidden size 2560, 36 layers |
-| FLUX.2-klein-9B | a Qwen3-8B: `qwen3`, hidden size 4096, 36 layers |
+CLI equivalent: `--flux3-transformer <repo-or-folder>`.
 
-Anything else is refused **before it loads**, with the reason — e.g. *hidden size 2560,
-and FLUX.2-klein-9B's encoder is 4096 wide … this is an encoder for FLUX.2-klein-4B*.
-GGUF files (made for ComfyUI / llama.cpp) and single `.safetensors` files are refused
-too: the app needs the transformers **folder** (`config.json` + weights). The 4B ships
-the public `Qwen/Qwen3-4B`, bit for bit the encoder Z-Image uses, so abliterations of
-Qwen3-4B fit it.
+> FLUX.3 is weeks old, so the community fine-tune scene is still thin. The loading path
+> is the one inherited from the previous forks and it is tested on synthetic files;
+> expect few models to point it at for now.
 
-**Downloading one.** An encoder from Hugging Face goes into the HF cache
-(`%USERPROFILE%\.cache\huggingface\hub`), where the picker finds it. From the app folder,
-with its venv (`import cz_core` makes the download use the app's own Hugging Face token):
+### Text encoder
 
-```bat
-.venv\Scripts\python -c "import cz_core; from huggingface_hub import snapshot_download; print(snapshot_download('huihui-ai/Huihui-Qwen3-4B-abliterated-v2'))"
-```
-
-When the encoder sits in a **sub-folder** of its repo, next to GGUF files you do not need,
-fetch that folder only:
-
-```bat
-.venv\Scripts\python -c "import cz_core; from huggingface_hub import snapshot_download; print(snapshot_download('ponpoke/flux2-klein-4b-uncensored-text-encoder', allow_patterns=['flux2-klein-4b-uncensored-text-encoder/*']))"
-```
-
-A **gated** repo answers `403 … not in the authorized list` until you accept its terms on
-its Hugging Face page, **with the account of the token the app uses** (`hf_token` in
-`config.txt` / `preferences.json`, or `HF_TOKEN`): accepting with another account changes
-nothing. A local folder works too: put it under `text_encoders\<name>\` next to your
-checkpoints folder or its parent, or point `text_encoders_dir` at your own folder.
-
-**Picking it.** The list offers *Default (base repo's own)*, the folders found, and the
-encoders of the HF cache that fit the current base, marked *(HF cache)*. Pick one, or paste
-a folder path or a Hugging Face id (`owner/repo`, or `owner/repo/subfolder`) and press
-Enter. The status line confirms, and the model reloads on the next run with the prompt
-cache cleared. Encoders of the cache that do **not** fit the current base are named under
-the list with the reason (typically Qwen3-4B encoders while the 9B is selected: switch
-to the 4B to use them). The list follows a model change; **Refresh encoders** rescans
-after a download.
-
-**What is recorded.** An image made with a replacement encoder carries `text_encoder` in
-its metadata (folder name or Hugging Face id, never a local path) and `Text encoder:` in
-its A1111 parameters; an encoder asked for but set aside at load time is recorded as
-`text_encoder_not_applied`. The queue keeps each job's encoder, and *Default* survives a
-restart. Config: `text_encoder`, `text_encoders_dir`; env `KLEIN_TEXT_ENCODER`.
-
-> Measured on the 4B (4 steps, seed 12345, the three bench prompts), similarity to the
-> stock encoder's image on portrait / scene / chalkboard: `huihui-ai/Huihui-Qwen3-4B-abliterated-v2`
-> 0.94 / 0.75 / 0.85, chalkboard spelt right; `ponpoke/flux2-klein-4b-uncensored-text-encoder`
-> 0.87 / 0.61 / 0.41, two misspelt words. One seed: an indication, not a ranking. An
-> encoder cannot teach the transformer a concept it never learnt.
+FLUX.3 reads eight hidden states of its own **Qwen3-VL-4B** and nothing else fits that
+slot yet, so the **Text encoder** control of the previous engine (a replacement Qwen3)
+is greyed out, and the encoder is not trimmed either (the pruning was written for a
+plain Qwen3; the app says so once at load time, `trim_text_encoder: false` silences it).
+A `text_encoder` value left in a `config.txt` from crispz-klein is kept but not applied,
+and the image metadata records it as `text_encoder_not_applied`.
 
 ### LoRA (up to 3, combinable)
 
-**Models → LoRA**: set the folder → **Refresh** → pick **up to 3 LoRAs**, each with
-its own **weight** (range **`-2..2`**, configurable via `lora_weight_min` /
-`lora_weight_max`). A **negative weight inverts the LoRA's effect** — a "skinny slider"
-LoRA at `-1` pushes the other way; `0` disables it. They are combined (`set_adapters`) on
-the transformer (shared
-by txt2img/img2img) and applied on the next run **without reloading the model** —
-changing a weight is instant, swapping LoRA files takes ~1 s. Selecting LoRAs auto-fills their
-merged **keywords / trigger words** (read from the file metadata); **Add to prompt**
-appends them.
+**Models, LoRA**: set the folder, **Refresh**, pick **up to 3 LoRAs**, each with its own
+**weight** (range **`-2..2`**, configurable via `lora_weight_min` / `lora_weight_max`). A
+**negative weight inverts the LoRA's effect**: a "skinny slider" LoRA at `-1` pushes the
+other way; `0` disables it. They are combined (`set_adapters`) on the transformer (shared
+by txt2img / img2img / edit) and applied on the next run **without reloading the
+model**: changing a weight is instant, swapping LoRA files takes about 1 s. Selecting
+LoRAs auto-fills their merged **keywords / trigger words** (read from the file
+metadata); **Add to prompt** appends them. FLUX.3 LoRAs only: a FLUX.2 Klein LoRA is
+refused with its reason (its layers do not exist in FLUX.3, peft would match nothing).
+
+**LyCORIS LoKr.** A LoKr is not a LoRA: its update is a Kronecker product, `dW = w1 (x)
+w2`, and neither peft nor diffusers can apply one. It is supported by **merging it into
+the weights** at load: drop it in the LoRA folder and pick it in *Models, LoRA* like any
+other. The trade-off, stated plainly: a merge is not an adapter. Changing which LoKr is
+selected, or its weight, reloads the transformer (the app detects it and says so), where
+a PEFT LoRA is swapped in place. LoHa is *not* supported and is refused by name.
+
+**Extra LoRA folders**: `loras_extra_dirs` (config, or the textbox under the LoRA
+folder, or `--loras-extra-dir`) merges other libraries, e.g. a shared Civitai folder,
+into every LoRA list. On a duplicate file name the main folder wins.
 
 ### Edit LoRA presets
 
-On klein the edit (Reference (Omni) tab, protocol op `edit`) runs on the **same**
-pipeline as txt2img: the LoRA slots above apply to edits too, and the **Edit LoRA
-presets** dropdown under the reference images adds its preset on top. The 19
-Qwen-Image-Edit task LoRAs of the upstream fork cannot load on FLUX.2 and are not
-listed. Two presets are, both from
-[`lrzjason/Consistance_Edit_Lora`](https://huggingface.co/lrzjason/Consistance_Edit_Lora)
-(Apache-2.0): **Consistence-Edit** for the 4B and **Consistence-Edit 9B** for the 9B.
-They keep the edited image consistent with the input (colors, framing, fine detail);
-more weight means more consistency and less room for the edit. Picking a preset sets
-the weight slider to its advised value (0.6, author: 0.5-0.7). A preset made for the
-other model is refused with one sentence, not forty lines of `size mismatch`. `⬇` =
-fetched from Hugging Face on first selection into
-`<loras_dir>/_hf-edit/<adapter>.safetensors`, `✓` = already on disk, including a copy
-of the same file in one of your LoRA folders (e.g. downloaded from CivitAI). They have
-**no trigger word**: the instruction is the prompt (**Use example prompt** fills the
-author's wording). Presets marked "2 images" want the image to edit in **Ref 1** and the
-reference (light, style) in **Ref 2**. The **Edit LoRAs** checkbox in Models → LoRA
-switches the whole edit set on/off without losing the selection. `config.txt`
-`edit_loras` adds/replaces/removes presets, `edit_loras_dir` moves the folder.
+The edit (Reference (Omni) tab, protocol op `edit`) runs on the **same** pipeline as
+txt2img: the LoRA slots above apply to edits too, and the **Edit LoRA presets** dropdown
+under the reference images adds its preset on top. **The catalogue ships empty**: no
+edit-task LoRA has been published for FLUX.3 yet, and the consistency presets of the
+previous engine are FLUX.2 files. The machinery is intact and waits for the first one:
+declare it in `config.txt` and it appears in the dropdown, downloads from Hugging Face on
+first selection into `<loras_dir>/_hf-edit/<adapter>.safetensors` (or reuses a copy found
+in one of your LoRA folders), and picking it sets the weight slider to its advised value:
 
-**Edit speed** (next dropdown): `Lightning 4 steps` / `Lightning 8 steps` stack the
-lightx2v Lightning edit LoRA (2509 or 2511, chosen from the edit model name; taken
-from your LoRA folders when already there, downloaded otherwise) and force N steps
-with CFG off. `Auto (model profile)` is for an already-distilled edit model such as
-a Rapid-AIO single file set as `zimage_omni_model` (`.gguf` or `.safetensors`, the
-FP8 builds are dequantized like the base): steps/guidance come from
-`model_profiles` (`aio` = 4 steps). `Off` keeps the Settings values. Initial value:
-`config.txt` `edit_fast`.
+```json
+"edit_loras": {
+  "Relight": {"repo": "someone/flux3-relight-lora", "weights": "relight.safetensors",
+              "adapter_name": "relight-f3", "prompt": "Relight the scene with a warm sunset.",
+              "inputs": 1, "weight": 0.7}
+}
+```
 
-**Extra LoRA folders**: `loras_extra_dirs` (config, or the textbox under the LoRA
-folder, or `--loras-extra-dir`) merges other libraries, e.g. a shared Civitai
-folder, into every LoRA list. On a duplicate file name the main folder wins.
+The **Edit LoRAs** checkbox in Models, LoRA switches the whole edit set on/off without
+losing the selection; `edit_loras_dir` moves the folder. The **Edit speed** control
+(Lightning LoRAs) is hidden until a FLUX.3 speed LoRA exists: the distilled checkpoint
+already runs 16 steps.
 
 ## Disabling the upscale (pure txt2img / pure img2img)
 
-- **txt2img only** (no upscale): the default. Don't pass `--upscale` (CLI), or leave
+- **txt2img only** (no upscale): the default. Do not pass `--upscale` (CLI), or leave
   the "Upscale after generation" checkbox off (UI).
 - **img2img only** (refine without ESRGAN enlargement): `--no-esrgan` (CLI), or
   uncheck **"ESRGAN upscale"** in the Image -> Upscale tab. The diffusion refine runs
@@ -996,7 +834,7 @@ folder, into every LoRA list. On a duplicate file name the main folder wins.
 - **ESRGAN only** (fast upscale, skip the slow refine): `--no-refine` (CLI, shortcut
   for `--denoise 0`), or uncheck **"Refine (img2img)"** in the Image -> Upscale tab.
   The two stages are independent toggles: the diffusion refine runs at the *upscaled*
-  resolution, so it is the slow part — turn it off when you just want a clean enlarge.
+  resolution, so it is the slow part; turn it off when you just want a clean enlarge.
 
 ```bash
 # img2img only: diffusion refine on the input, no enlargement
@@ -1013,12 +851,14 @@ python app.py --cli -i in.png -m 4x-ClearRealityV1_Soft.safetensors --no-refine 
 
 ### Requirements
 
-- Python 3.11+ (3.13 advised; diffusers 0.42.1 and Pillow 13 are not published for 3.10)
-- PyTorch **already installed** with your CUDA build (the project targets
-  PyTorch 2.7+ / CUDA 12.8). **NEVER reinstall torch** from this project; it
-  aligns with your existing environment.
-- An NVIDIA GPU with >= 8 GB VRAM is recommended. RTX 5090 tested in native BF16,
-  whole-image up to 2048px without trouble.
+- **Python 3.11 or newer** (3.13 advised): `diffusers 0.42.1`, the first release with
+  FLUX.3, and Pillow 13 are not published for 3.10. The installers pick 3.13, then 3.12,
+  then 3.11, and refuse older ones.
+- An NVIDIA GPU. Measured on an RTX 5090 (32 GB) in bf16: 18.8 GB resident, 23.7 GB
+  peak. A 24 GB card runs bf16 whole; a 16 GB card gets CPU offload `model`
+  automatically, or picks fp8r / nvfp4 in the Precision selector.
+- A Hugging Face account that accepted the FLUX.3 licence (see
+  [The model (first run)](#the-model-first-run)).
 
 ### Provided install scripts
 
@@ -1034,25 +874,30 @@ run.bat
 cli.bat
 ```
 
-The install scripts:
-- find a base Python that already has PyTorch (never touch torch),
-- by default create a **`.venv` virtual environment with
-  `--system-site-packages`**: it **inherits your system torch/CUDA** (no torch
-  reinstall) while **isolating crispz's own deps** (diffusers, gradio, spandrel)
-  from your global Python,
-- automatically uninstall a broken `xformers` (built for the wrong torch
-  version -> DLL load error when diffusers loads),
-- install the other deps from `requirements.txt`,
-- verify that `Flux2KleinInpaintPipeline` loads,
+By default the install scripts create an **isolated `.venv`** from
+`requirements-lock.txt`: the exact versions of an environment really resolved and
+imported here (torch 2.11 + CUDA 12.8, diffusers 0.42.1, transformers 5.x, Pillow 13),
+about 3.5 GB of torch to download the first time. They also:
+
+- set `PYTHONUTF8=1` (the `trustmark` package builds from a source archive whose setup
+  script is not cp1252-safe on Windows),
+- install Pillow 13 apart, with `--no-deps`: gradio 5.50 declares `pillow<12` while the
+  image-decoding CVEs are only fixed in 13, and the combination is checked against this
+  code base,
+- automatically uninstall a broken `xformers` (built for the wrong torch: DLL load error
+  when diffusers loads),
+- verify that `diffusers.modular_pipelines.Flux3DistilledAutoBlocks` imports,
 - create the `upscale_models/` folder.
 
-`run.sh` / `cli.sh` (and the `.bat`) automatically use `.venv` if it exists.
+`install.bat --shared` (or `install.sh --shared`) creates the venv with
+`--system-site-packages` instead, inheriting your global torch and installing the rest
+from `requirements.txt` (wide bounds, versions nobody chose). `run.sh` / `cli.sh` (and
+the `.bat`) automatically use `.venv` if it exists.
 
 ### venv or not: the `--no-venv` flag
 
-The venv is the default (keeps your global Python clean). To install/run directly
-on the current interpreter instead (the old behavior), pass `--no-venv` (or
-`--system`) to any script:
+The venv is the default (keeps your global Python clean). To install/run directly on
+the current interpreter instead, pass `--no-venv` (or `--system`) to any script:
 
 ```bash
 ./install.sh --no-venv      # install on the current Python
@@ -1066,52 +911,60 @@ run.bat --no-venv
 
 If venv creation fails, the scripts fall back to the current Python automatically.
 
-Equivalent manual install (no venv):
+Equivalent manual install (an isolated venv, Windows):
 
-```bash
-pip install -r requirements.txt
+```bat
+py -3.13 -m venv .venv
+.venv\Scripts\python -m pip install --upgrade pip setuptools wheel
+set PYTHONUTF8=1
+.venv\Scripts\python -m pip install -r requirements-lock.txt
 ```
 
 ### Known environment pitfalls
 
-- **Incompatible `xformers`.** If an `xformers` version is installed but built
-  for a different torch (e.g. `xformers` for torch 2.9 while you have torch 2.8),
-  diffusers crashes with `DLL load failed while importing _C` when loading the
-  VAE. Fix: `pip uninstall xformers`. The native SDPA in torch 2.7+ is enough.
-- **`transformers` too old.** FLUX.2 Klein uses a **Qwen3 text encoder**
-  (`Qwen3ForCausalLM`), available since transformers >= 4.51. The requirements pin
-  this lower bound; below it the pipeline fails to load the encoder.
-- **diffusers from git.** The FLUX.2 pipelines (`Flux2KleinPipeline`,
-  `Flux2KleinInpaintPipeline`) only exist in diffusers from source, hence the pinned
-  `git+...` commit in requirements. Install/Update verify the import explicitly.
+- **Python 3.10.** `pip` answers *No matching distribution found for diffusers==0.42.1*
+  (and the same for Pillow 13): both require 3.11+. Install 3.13 and run the installer
+  again.
+- **Incompatible `xformers`.** If an `xformers` version is installed but built for a
+  different torch, diffusers crashes with `DLL load failed while importing _C` when
+  loading the VAE. Fix: `pip uninstall xformers`. The native SDPA in torch 2.7+ is
+  enough.
+- **`transformers` 4.x.** diffusers 0.42.1 wants `huggingface-hub>=1.32` and
+  transformers 4.x pins `huggingface-hub<1.0`: pip cannot resolve the two together
+  (`ResolutionImpossible`). transformers 5.x is required, the lock carries 5.21.
+- **torchvision from PyPI.** It must come from the same index as torch (`+cu128`), or
+  `operator torchvision::nms does not exist` breaks every transformers vision import;
+  the lock pins both from the cu128 index.
 - **Gradio pinned `<6`.** Gradio 6's Brotli middleware has an h11 bug that spams
   `Too little data for declared Content-Length` in the console when a response is
   interrupted (non-fatal, but noisy). Requirements pin `gradio<6` to avoid it.
 
 ---
 
-## Configurable paths (ESRGAN_DIR + the Klein model)
+## Configurable paths (ESRGAN_DIR + the FLUX.3 model)
 
 Two paths are configurable, persisted in `preferences.json`. Resolution order on
 each launch:
 
-1. Environment variable (`ESRGAN_DIR`, `KLEIN_MODEL`)
+1. Environment variable (`ESRGAN_DIR`, `FLUX3_MODEL`)
 2. `preferences.json` at the project root
-3. Default: `./upscale_models` for ESRGAN, `black-forest-labs/FLUX.2-klein-4B` for the model
+3. Default: `./upscale_models` for ESRGAN, `black-forest-labs/flux-3-image-klein` for the model
 
 Three ways to change them:
 
-- **Gradio UI**: **Advanced → Models** tab. Pick the model in the **Klein
-  checkpoint** dropdown (it reloads on next Generate), set the **Checkpoints /
-  Extra checkpoints / ESRGAN** folders, then **Refresh ESRGAN** or **Save paths**
-  (writes `preferences.json`).
-- **CLI**: `--esrgan-dir <path>`, `--klein-model <repo_or_path>`, `--save-paths`
-  to persist (with or without `-i`).
-- **Interactive CLI** (`cli.sh` / `cli.bat`): first prompt = ESRGAN folder +
-  Klein model. Saved to `preferences.json` if you choose to keep them.
+- **Gradio UI**: **Advanced, Models** tab. Pick the model (the **FLUX.3 checkpoint**
+  selector, or a single file in the **Checkpoint** dropdown; it reloads on next
+  Generate), set the **Checkpoints / Extra checkpoints / ESRGAN** folders, then
+  **Refresh ESRGAN** or **Save paths** (writes `preferences.json`).
+- **CLI**: `--esrgan-dir <path>`, `--flux3-model <repo_or_path>`, `--save-paths` to
+  persist (with or without `-i`).
+- **Interactive CLI** (`cli.sh` / `cli.bat`): first prompt = ESRGAN folder + FLUX.3
+  model. Saved to `preferences.json` if you choose to keep them.
 
-`klein_model` accepts either an HF repo (e.g. `black-forest-labs/FLUX.2-klein-4B`) or a
-local path to an already-downloaded `diffusers` folder.
+`flux3_model` accepts an HF repo (`black-forest-labs/flux-3-image-klein` or `-base`), a
+local path to an already-downloaded `diffusers` folder, or a single-file checkpoint.
+`flux3_precision` (bf16 / fp8r / nvfp4) and `flux3_transformer` sit next to it; the env
+names are `FLUX3_MODEL`, `FLUX3_TRANSFORMER`, `FLUX3_PRECISION`.
 
 ## ESRGAN models
 
@@ -1130,17 +983,46 @@ A few useful picks:
 
 ## The model (first run)
 
-No file to provide: on first launch, `diffusers` fetches the FLUX.2 Klein transformer,
-the VAE and the Qwen3-4B text encoder from Hugging Face, then everything is cached
-locally. Subsequent runs are offline.
+No file to provide: on first launch, `diffusers` fetches the FLUX.3 transformer (in the
+chosen precision), the VAE and the Qwen3-VL-4B text encoder from Hugging Face, about
+20 GB in bf16, then everything is cached locally (`%USERPROFILE%\.cache\huggingface`).
+Subsequent runs are offline.
 
-**Loading progress** — because the first load downloads several GB and then reads them
-into VRAM, it can take minutes. The terminal shows a live one-line status
-(`[crispz][load] FLUX.2 Klein base... 9s | 14.9 GB in VRAM`, or `... (downloading / reading,
-first run only)` before allocation starts) and the UI progress bar advances with it.
-Turn it off or tune it in `config.txt`:
-`"load_progress": {"enabled": true, "target_vram_gb": 14.0, "heartbeat_s": 2.0}`
-(`enabled: false` loads directly with no monitor thread).
+**The gate.** Both repos are gated, so the Hub refuses them until two things line up,
+and they are two *different* things, which is where the time gets lost:
+
+**1. Accept the licence**, at
+<https://huggingface.co/black-forest-labs/flux-3-image-klein> (and on the `-base` page
+if you use it: each repo has its own gate). It is `gated: auto`, no queue, no review, it
+takes effect at once.
+
+**2. Give the app a token from that same account.** Either:
+
+```bat
+huggingface-cli login          REM read token, picked up without restarting the app
+```
+
+or `"hf_token": "hf_..."` in `config.txt` (read at import, restart), or the field in
+**Advanced, Models** (applied immediately and persisted), or the `HF_TOKEN` environment
+variable.
+
+> **The trap: the account that accepted the licence must be the account the token
+> belongs to.** A token that lists the repo's files fine (the metadata is public) still
+> gets `GatedRepoError: you are not in the authorized list` on the first weight file if
+> the licence was accepted while your browser was logged in as someone else. Check who
+> the app actually is with `huggingface-cli whoami`.
+
+If the Hub refuses, the app does not hand you a `huggingface_hub` traceback: it says the
+repo is gated, links the page to accept, and tells you whether a token is being sent at
+all, so you know which of the two halves is missing.
+
+**Loading progress.** The first load downloads several GB and then reads them into
+VRAM; afterwards a load takes 50 s cold (disk cache empty) and about 22 s warm on an NVMe
+drive. The terminal shows a live one-line status (`[crispz][load] FLUX.3 Image Klein ...
+9s | 14.9 GB in VRAM`, or `... (downloading / reading, first run only)` before
+allocation starts) and the UI progress bar advances with it. Turn it off or tune it in
+`config.txt`: `"load_progress": {"enabled": true, "target_vram_gb": 19.0,
+"heartbeat_s": 2.0}` (`enabled: false` loads directly with no monitor thread).
 
 ---
 
@@ -1170,7 +1052,7 @@ UI at http://127.0.0.1:7860. It includes:
 python app.py --cli -i my_image.jpg \
     --save-mode local --output-dir out --output-format png \
     -m 4x-ClearRealityV1_Soft.safetensors \
-    --factor 2 --denoise 0.30 --steps 12 --tile 760 --overlap 32
+    --factor 2 --denoise 0.30 --steps 16 --tile 760 --overlap 32
 
 # Batch over a whole folder
 python app.py --cli -i ./my_images --save-mode local --output-dir out --output-format webp
@@ -1194,6 +1076,16 @@ python app.py --cli -i ./my_images --save-mode local --time-log runs.tsv
 Prompts for each setting (paths, models, source, pipeline, save, time-log) with a
 default value from `preferences.json`. Offers to save the choices at the end of the
 session.
+
+### 4) Tests
+
+```bash
+.venv/Scripts/python -m pytest tests -q            # the CPU suite (tiny random models, no download)
+.venv/Scripts/python tests/test_flux3_e2e.py       # the GPU end-to-end run (needs CUDA + the gated repo)
+```
+
+The e2e renders the five images at the top of this page, prints a timing per step and
+the VRAM peaks, and skips itself cleanly without CUDA or without access to the repo.
 
 ## Presets (use cases)
 
@@ -1222,7 +1114,8 @@ Every UI setting has a CLI flag and a prefs key:
 | UI / interactive CLI | CLI flag | preferences.json | Default |
 |---|---|---|---|
 | ESRGAN_DIR | `--esrgan-dir` | `esrgan_dir` | `./upscale_models` |
-| Klein model | `--klein-model` | `klein_model` | `black-forest-labs/FLUX.2-klein-4B` |
+| FLUX.3 model | `--flux3-model` | `flux3_model` | `black-forest-labs/flux-3-image-klein` |
+| Precision | (config / UI) | `flux3_precision` | `bf16` |
 | Source image | `-i` (file or glob) | - | - |
 | Batch source folder | `-i` (folder) or `--input-folder` | - | - |
 | ESRGAN model | `-m` / `--model` | `model` | `4x-ClearRealityV1_Soft.safetensors` |
@@ -1230,14 +1123,14 @@ Every UI setting has a CLI flag and a prefs key:
 | Upscale factor | `--factor` | `factor` | `2.0` |
 | Denoise (strength) | `--denoise` | `denoise` | `0.30` |
 | Skip refine (ESRGAN only) | `--no-refine` | "Refine (img2img)" checkbox (off) | refine on |
-| Diffusion steps | `--steps` | `steps` | `12` |
+| Diffusion steps | `--steps` | `steps` | `16` |
 | Prompt | `--prompt` | `prompt` | `""` |
 | Seed | `--seed` | `seed` | `-1` |
 | ESRGAN tile | `--tile` | `tile` | `760` |
 | Overlap | `--overlap` | `overlap` | `32` |
-| Sampler | `--sampler {euler,unipc,lcm}` | "Sampler" dropdown (next to CFG) | `default_sampler` (`euler`) |
-| Sigma schedule | `--schedule {sgm_uniform,beta,karras,exponential}` (`simple` = `sgm_uniform`) | "Schedule" dropdown | `default_schedule` (`sgm_uniform`) |
-| CPU offload (diffusion) | `--cpu-offload` | - | `none` |
+| Sampler | `--sampler` (accepted, Euler is applied) | greyed dropdown | `euler` |
+| Sigma schedule | `--schedule` (accepted, sgm_uniform is applied) | greyed dropdown | `sgm_uniform` |
+| CPU offload (diffusion) | `--cpu-offload` | - | `auto` |
 | Diffusion tile (4K+) | `--refine-tile` | "Diffusion tile" dropdown | `0` = **Auto** |
 | Diffusion tile overlap | `--refine-overlap` | - | `64` |
 | Save mode | `--save-mode` | `save_mode` | `display` |
@@ -1268,11 +1161,12 @@ Full `preferences.json` example:
 ```json
 {
   "esrgan_dir": "C:/path/to/models/ESRGAN",
-  "klein_model": "black-forest-labs/FLUX.2-klein-4B",
+  "flux3_model": "black-forest-labs/flux-3-image-klein",
+  "flux3_precision": "bf16",
   "model": "4x-ClearRealityV1_Soft.safetensors",
   "factor": 2.0,
   "denoise": 0.30,
-  "steps": 12,
+  "steps": 16,
   "prompt": "",
   "seed": -1,
   "tile": 760,
@@ -1289,7 +1183,7 @@ Full `preferences.json` example:
 `run()` returns (and prints / logs) the time of each stage:
 
 - `esrgan` : stage 1 (Real-ESRGAN + Lanczos resize)
-- `refine` : stage 2 (img2img, served by the inpaint pipeline). 0s if `denoise <= 0`.
+- `refine` : stage 2 (img2img through the FLUX.3 adapter). 0s if `denoise <= 0`.
 - `total`  : sum
 
 crispz also prints `[crispz] ...` stage logs to **stderr** (loading ESRGAN, loading
@@ -1330,54 +1224,41 @@ echo "upscaled image: $dst"
 is printed.
 
 **Fooocus2026 Extra plugin** (`fooocus_extra.json`): the install steps mirror
-`install.bat`, including Pillow 12.3.0 set with `--no-deps` after
-`requirements.txt` (gradio's `pillow<12` bound pulls it back down during the
-deps step; only 12.x fixes the image-decoding CVEs). That step carries
-`"rerun_with_deps": true`, so the plugin manager replays it after every update
-that reinstalls the dependencies.
+`install.bat`, including Pillow 13 set with `--no-deps` after `requirements.txt`
+(gradio's `pillow<12` bound pulls it back down during the deps step; only 13 fixes the
+image-decoding CVEs). That step carries `"rerun_with_deps": true`, so the plugin manager
+replays it after every update that reinstalls the dependencies.
 
 ---
 
 ## VRAM offload (`--cpu-offload`)
 
-The diffusion refinement pass is the heavy VRAM consumer. By default it runs fully
-on the GPU. To shrink the peak (so crispz can coexist with another GPU app, e.g. a
-loaded Fooocus), `--cpu-offload` streams the diffusion weights between RAM and GPU.
-This is NOT quantization: weights stay BF16, they just move RAM <-> GPU. Requires
-`accelerate` (already in `requirements.txt`). Available in the UI too (Tiling/VRAM
-accordion) and on the CLI.
+The diffusion passes are the heavy VRAM consumers. `--cpu-offload` streams the
+diffusion weights between RAM and GPU to shrink the peak (so crispz can coexist with
+another GPU app, e.g. a loaded Fooocus). This is NOT quantization: weights stay BF16,
+they just move RAM <-> GPU. Requires `accelerate` (already in `requirements.txt`).
+Available in the UI too (Tiling/VRAM accordion) and on the CLI.
 
 | Mode | What it does |
 |---|---|
-| `none` (default) | Everything in VRAM. Fastest, highest peak. |
-| `model` | Offload per submodule. Good tradeoff: ~half the peak, similar speed. |
-| `sequential` | Most aggressive, lowest peak, a bit slower. |
+| `auto` (default) | at load time, measures the *free* VRAM and picks `none` only when the weights plus a 4 GB margin provably fit; otherwise `model`. The verdict is cached per GPU + model (`cache/hw_profile.json`); **Re-test VRAM** after closing another GPU app. |
+| `none` | Everything in VRAM. Fastest, highest peak. |
+| `model` | One component on the GPU at a time (encoder, transformer, VAE), the others parked in RAM. About the transformer's size as a peak, a little slower. Forced for a GGUF transformer (the only mode that puts a quantized model on the GPU). |
+| `sequential` | Layer by layer from RAM. Lowest peak, the slowest. |
 
-Measured (RTX 5090, source 832x1216 -> x2 = 1664x2432, denoise 0.30, 12 steps):
-
-| Mode | Peak allocated | Peak reserved | Time |
-|---|---|---|---|
-| `none` | 28.48 GB | 32.35 GB (spills to shared RAM) | ~59s |
-| `model` | 13.54 GB | 24.02 GB | ~52s |
-| `sequential` | 9.20 GB | 9.22 GB | ~61s |
+What the weights ask for, by precision (BFL's figures, the bf16 one measured here):
+**19 GB** in bf16, **14.4 GB** in fp8r, **13.5 GB** in nvfp4. On the RTX 5090, `auto`
+resolves to `none` (30.3 GB free for 22.9 GB needed) and a 1024x1024 image peaks at
+23.7 GB. On a 16 GB card `auto` resolves to `model` in bf16; fp8r or nvfp4 fit whole.
 
 ```bash
 python app.py --cli -i in.png --save-mode local --output-dir out \
     --cpu-offload sequential --report-vram
 ```
 
-**Recommended (32 GB card):**
-
-- **2K output (<= ~2048 px):** `--cpu-offload model`. Fits in ~24 GB and is the
-  fastest. `none` needs 32.35 GB and spills into Windows shared memory on a 32 GB
-  card, which is slower.
-- **4K+:** add `--refine-tile 1024` (diffusion tiling) on top of `--cpu-offload
-  model` (or `sequential`). Whole-image at 4K OOMs.
-- **Sharing the GPU with another app:** `--cpu-offload sequential` (~9 GB).
-
-In the Fooocus Extra plugin the host SDXL model is unloaded before each call, so
-crispz gets almost the whole card. `model` is still the best 2K pick because `none`
-sits right at the 32 GB limit and spills.
+**Recommended (32 GB card):** leave `auto`. Add `--refine-tile 1024` (diffusion tiling)
+for 4K+ refines, whose whole-image pass would not fit. **Sharing the GPU with another
+app:** `--cpu-offload model`.
 
 ---
 
@@ -1391,18 +1272,20 @@ fastest first:
   (img2img)"** (UI) or `--no-refine` (CLI). ESRGAN alone is near-instant.
 - **Refine before upscale**: check **"Refine before upscale (faster)"** (UI) or
   `--refine-first` (CLI). The diffusion runs at the *native* resolution, then ESRGAN
-  enlarges -> the refine is ~4-16x faster (a touch less high-res detail). Default
-  via `default_refine_first` in `config.txt`.
-- **`--cpu-offload model`**: on a 32 GB card the x2 refine at ~2K *spills* into
-  Windows shared memory in `none` mode (slow); `model` fits in ~24 GB with no spill
-  and is actually **faster**. This is the single biggest fix if the refine crawls.
-- **Fewer refine steps / lower denoise** (effective steps = `steps x denoise`).
-- **Attention slicing is now per-pass, by resolution** (`attention_slice_above`, default
+  enlarges: the refine is 4 to 16x faster (a touch less high-res detail). Default via
+  `default_refine_first` in `config.txt`.
+- **Fewer refine steps / lower denoise**: the strength is a fraction of the steps, so
+  the steps actually run are `steps x denoise` (6 of 16 at 0.35, measured 2.3 s at
+  1024x1024 on the 5090).
+- **Precision**: fp8r is faster than bf16 from compute capability 8.9 and halves the
+  transformer's footprint; nvfp4 goes further on Blackwell. Both are still to be
+  measured here.
+- **Attention slicing is per-pass, by resolution** (`attention_slice_above`, default
   1664 px): OFF for tiles / 1024-1536 (native SDPA attention = fast, like ComfyUI), ON
   only for whole-image 2K+ (caps the VRAM peak, avoids the shared-RAM spill). This is the
   big one for **tiled upscale** (`--refine-tile 1024`): slicing no longer slows the tiles.
-- **`--cpu-offload none`** on a big card (5090): `model`/`sequential` stream weights
-  RAM<->GPU every step (much slower); only use them when you actually lack VRAM. With
+- **`--cpu-offload none`** on a big card: `model`/`sequential` stream weights RAM<->GPU
+  every step (much slower); only use them when you actually lack VRAM. With
   `--refine-tile`, VRAM is already capped, so keep offload `none`.
 - TF32 matmul is enabled on CUDA.
 
@@ -1416,10 +1299,10 @@ python app.py --cli -i in.png -m 4x-ClearRealityV1_Soft.safetensors --refine-fir
 
 ## Server mode (`--serve`)
 
-For repeated upscales, the per-call model load (transformer + Qwen3 encoder) dominates
-and makes timings very uneven. `--serve` runs a small HTTP server that loads the model
-**lazily on the first request** and keeps it **warm**, then **frees the VRAM after
-`--idle-timeout` seconds** of inactivity (so it can coexist with another GPU app).
+For repeated upscales, the per-call model load (transformer + Qwen3-VL encoder)
+dominates and makes timings very uneven. `--serve` runs a small HTTP server that loads
+the model **lazily on the first request** and keeps it **warm**, then **frees the VRAM
+after `--idle-timeout` seconds** of inactivity (so it can coexist with another GPU app).
 Requires `fastapi` + `uvicorn`.
 
 ```bash
@@ -1442,8 +1325,8 @@ curl -s http://127.0.0.1:7861/upscale -H "Content-Type: application/json" -d '{
 }'
 ```
 
-Measured benefit (RTX 5090, 2K): first call ~66s (cold, model load), next call ~46s
-(warm). The model stays resident between calls until the idle timeout fires.
+The model stays resident between calls until the idle timeout fires: the 22 to 50 s of
+loading are paid once, not per image.
 
 ---
 
@@ -1451,12 +1334,12 @@ Measured benefit (RTX 5090, 2K): first call ~66s (cold, model load), next call ~
 
 | Setting | Advice |
 |---|---|
-| **Denoise (strength)** | 0.05-0.25 = subtle, stays very close to the input. 0.25-0.40 = creative, more detail injected. Beyond ~0.40, the model starts to reinvent. At high denoise, a **detailed caption prompt** greatly improves coherence. |
-| **Denoise + tiled refine (4K+)** | When the refine is **tiled** (4K, or auto-tiled above `auto_refine_tile_above`), each tile is re-diffused independently. The **global prompt describes the whole scene, not the tile** -> passing it to every tile makes the model redraw the subject (you get the teacup / butterfly repeated in several tiles). Two guards: (1) `refine_tile_prompt` -> per-tile prompt, **empty by default** so each tile only refines local detail (set to `"global"` for the old behavior, or a generic string like `"high detail, sharp focus"`); (2) `refine_tile_denoise_cap` (default **0.40**) caps the per-tile denoise as a safety net. Whole-image refine keeps your prompt and denoise (no duplication possible). |
-| **Diffusion tile size (4K+)** | The dropdown defaults to **Auto**: below `auto_refine_tile_above` the refine runs on the whole image, and above it the tile size is **computed from the output size** to minimise the *tiled surface* (`tiles x tile^2`) - which is what the pass actually costs. Measured on an RTX 5090 at 4096x4096: the cost per pixel is flat from 768 to 1024 (1.78 / 1.83 / 1.79 us/px) and only climbs beyond (2.41 at 1536, 3.00 at 2048), so time follows the covered surface, not the tile size. The old fixed 1024 overflowed the grid (step 960 on 4096 -> the last tile is clamped and re-covers 832px instead of 64 = **1.56x** the image area); Auto picks 896 there (1.20x) -> **36.7s instead of 46.9s**, same 25 tiles and same 8 seams. Search is bounded to `[768, 1024]` (`auto_refine_tile_min` / `auto_refine_tile_max`): smaller tiles multiply seams and give the model less context, which visibly changes the render. Pick a fixed size in the dropdown, or set `auto_refine_tile` to an integer, to force it. |
-| **Steps** | Effective steps ~= `steps * strength`. At strength 0.30, 12-16 steps give enough denoising steps. |
-| **Guidance** | Irrelevant: klein is distilled and ignores CFG entirely. |
-| **Prompt** | Optional. Empty works very well if denoise <= 0.30. |
+| **Denoise (strength)** | A fraction of the steps. 0.05-0.25 = subtle, stays very close to the input. 0.25-0.40 = creative, more detail injected. Beyond 0.40, the model starts to reinvent. At high denoise, a **detailed caption prompt** greatly improves coherence. |
+| **Denoise + tiled refine (4K+)** | When the refine is **tiled** (4K, or auto-tiled above `auto_refine_tile_above`), each tile is re-diffused independently. The **global prompt describes the whole scene, not the tile**: passing it to every tile makes the model redraw the subject (you get the teacup / butterfly repeated in several tiles). Two guards: (1) `refine_tile_prompt`, a per-tile prompt, **empty by default** so each tile only refines local detail (set to `"global"` for the old behavior, or a generic string like `"high detail, sharp focus"`); (2) `refine_tile_denoise_cap` (default **0.40**) caps the per-tile denoise as a safety net. Whole-image refine keeps your prompt and denoise (no duplication possible). |
+| **Diffusion tile size (4K+)** | The dropdown defaults to **Auto**: below `auto_refine_tile_above` the refine runs on the whole image, and above it the tile size is **computed from the output size** to minimise the *tiled surface* (`tiles x tile^2`), which is what the pass actually costs. Measured on the previous engine at 4096x4096: the cost per pixel is flat from 768 to 1024 and only climbs beyond, so time follows the covered surface, not the tile size; a fixed 1024 overflowed the grid and re-covered 832 px instead of 64 on the last tile, Auto picks 896 there. Search is bounded to `[768, 1024]` (`auto_refine_tile_min` / `auto_refine_tile_max`): smaller tiles multiply seams and give the model less context, which visibly changes the render. Pick a fixed size in the dropdown, or set `auto_refine_tile` to an integer, to force it. |
+| **Steps** | 16 on the distilled checkpoint (its training recipe), about 50 on the base one. For a refine, the steps actually run are `steps x strength`. |
+| **Guidance** | Inert on the distilled checkpoint; a real CFG (3.5 advised) on the base one. |
+| **Prompt** | Optional for a refine. Empty works very well if denoise <= 0.30. For an edit or an inpaint, describe the whole target image. |
 | **Factor** | ESRGAN runs at native x4, then Lanczos resizes to the requested factor. For a clean x2, the image goes through a raw x4. |
 | **ESRGAN tiling** | 0 (whole image) on 24+ GB VRAM. 512-768 otherwise. Overlap 32 by default, increase if you see seams. |
 
@@ -1468,23 +1351,23 @@ Ampere = CC 8.0), and the max image size for the diffusion pass.
 
 ## Reference settings
 
-A reliable starting point (source ~832x1216 -> x2), model
-`4x-ClearRealityV1_Soft.safetensors`, factor 2, denoise 0.30, steps 12,
+A reliable starting point (source about 832x1216 -> x2), model
+`4x-ClearRealityV1_Soft.safetensors`, factor 2, denoise 0.30, steps 16,
 tile 760, overlap 32:
 
 ```bash
 python app.py --cli -i my_image.jpg -o out/my_image_upscaled.png \
     -m 4x-ClearRealityV1_Soft.safetensors \
-    --factor 2 --denoise 0.30 --steps 12 --tile 760 --overlap 32
+    --factor 2 --denoise 0.30 --steps 16 --tile 760 --overlap 32
 ```
 
 ---
 
 ## High resolution (4K+): diffusion tiling
 
-By default the diffusion pass runs on the whole image. That is ideal up to ~2048px on
-the long side; beyond that you exceed the training resolution (artifacts) and the
-VRAM peak explodes.
+By default the diffusion pass runs on the whole image. That is ideal up to about
+2048 px on the long side; beyond that you exceed the training resolution (artifacts)
+and the VRAM peak explodes.
 
 `--refine-tile <px>` (0 = off) tiles the diffusion pass, Ultimate SD Upscale style:
 each tile is refined separately and recomposed with linear feathering over
@@ -1494,46 +1377,44 @@ tile at a time, independent of the final size) and **enables 4K+**. Try a tile o
 
 ```bash
 # 4K refine, tiled, seam-free
-python app.py --cli -i in.png --factor 4 --denoise 0.30 --steps 12 \
+python app.py --cli -i in.png --factor 4 --denoise 0.30 --steps 16 \
     --refine-tile 1024 --refine-overlap 64 \
     --save-mode local --output-dir out
 ```
 
-Measured (RTX 5090, base 832x1216 -> x4 = 3328x4864, tile 1024, denoise 0.30):
-EXIT in ~86s, VRAM peak ~21.7 / 23.0 GB (vs OOM for whole-image 4K). Combine with
-`--cpu-offload` for an even lower peak. Whole-image mode (`--refine-tile 0`) stays
-the default and the best choice under ~2048px (no regression).
+Whole-image mode (`--refine-tile 0`) stays the default and the best choice under
+about 2048 px. The 4K timings on FLUX.3 are still to be measured.
 
 ---
 
 ## License
 
-CC BY-NC 4.0 (Creative Commons Attribution-NonCommercial). See `LICENSE.txt`.
+CC BY-NC 4.0 (Creative Commons Attribution-NonCommercial). See `LICENSE.txt`. The
+model itself is under the FLUX Kommunity License (see the top of this page).
 
 ## Family CLI protocol (v1)
 
 This tool speaks the crispz-family CLI protocol: `czp.bat gen --spec spec.json`
 (JSON spec in, one-line JSON out) **routes to the running app** when there is
-one (hidden `cli_caps`/`cli_gen` endpoints - the app's queue serializes the
+one (hidden `cli_caps`/`cli_gen` endpoints: the app's queue serializes the
 GPU and the model stays warm) and only loads the pipeline itself when no
 instance answers (night batch; `--local`/`--remote URL` force a route).
 Ops: `gen`, `upscale` (`input` + `factor`/`denoise`; **`factor` 1 = pure img2img
-variation, no ESRGAN stage**), `edit` (image + instruction; needs an edit
-model - see `caps.supports.edit`), `inpaint` (image + mask + local
-prompt: only the white area is redrawn, every engine). On `edit`, `spec.loras` accepts an edit preset
-name (`"Photo-to-Anime"`, `"upscale-2k:1.0"`, see `caps.edit_loras`) or a file, and
-lands on the edit pipe; `guidance` is applied there (distilled setups want 1.0),
-and an explicit `width`/`height` is passed to the pipe (Upscaler preset = 2x
-output). `fast` (`off|auto|lightning-4|lightning-8`, see `caps.edit_fast`) sets
-the edit speed mode; an explicit `steps` is never overridden by it. A broken
-`config.txt` (invalid JSON, e.g.
-single backslashes in a Windows path) is reported loudly at startup instead
-of silently falling back to the sample.
+variation, no ESRGAN stage**), `edit` (up to 10 reference images + an instruction that
+cites them as `<ref_image_N>`), `inpaint` (image + mask + a prompt describing the whole
+scene: only the white area is redrawn). On `edit`, `spec.loras` accepts an edit preset
+name (see `caps.edit_loras`, empty until one is declared) or a file, and lands on the
+edit pipe; `guidance` is applied there (the distilled checkpoint wants 1.0), and an
+explicit `width`/`height` is passed to the pipe (Upscaler preset = 2x output). `fast`
+(see `caps.edit_fast`, `off` only on FLUX.3) sets the edit speed mode; an explicit
+`steps` is never overridden by it. A broken `config.txt` (invalid JSON, e.g. single
+backslashes in a Windows path) is reported loudly at startup instead of silently
+falling back to the sample.
 `czp caps` prints capabilities and whether an instance is running. Exit codes:
 0 ok / 1 run error / 2 bad spec / 3 unsupported op or protocol / 4 no route.
 Every op of the v1 vocabulary (`caps`, `gen`, `upscale`, `edit`, `inpaint`) always
 answers in JSON: one a family tool does not implement comes back as code 3 with the
-reason, never as a usage dump on stderr - `caps.ops` lists the ops this build
+reason, never as a usage dump on stderr; `caps.ops` lists the ops this build
 implements, `caps.supports` what its engine can actually do.
 Config `cli_protocol.instance_url`. Contract + client reference:
 the comics2crispz repo (`docs/CLI_PROTOCOL.md`).

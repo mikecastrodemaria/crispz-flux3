@@ -77,30 +77,6 @@ def test_the_loader_reads_a_file_mixing_both_layouts():
     print("OK test_the_loader_reads_a_file_mixing_both_layouts")
 
 
-def test_the_cache_key_changes_only_for_prescaled_files():
-    d = tempfile.mkdtemp()
-    cache = tempfile.mkdtemp()
-    pre, reg = os.path.join(d, "pre.safetensors"), os.path.join(d, "reg.safetensors")
-    _tiny(pre, prescaled=True, both=True)
-    _tiny(reg, prescaled=False)
-    old = P._DQ_CACHE_CFG
-    try:
-        P._DQ_CACHE_CFG = cache
-        assert P._dequant_cache_path(pre) != P._dequant_cache_path(pre, legacy=True)
-        assert P._dequant_cache_path(reg) == P._dequant_cache_path(reg, legacy=True), \
-            "a normal file would lose its cache for nothing"
-        # the new cache written, the old (wrong) one of the same file disappears
-        stale = P._dequant_cache_path(pre, legacy=True)
-        with open(stale, "wb") as f:
-            f.write(b"x")
-        P._dequant_cache_store(pre, {"x": torch.zeros(1)})
-        assert os.path.isfile(P._dequant_cache_path(pre))
-        assert not os.path.exists(stale), "a wrong cache left on the disk"
-    finally:
-        P._DQ_CACHE_CFG = old
-    print("OK test_the_cache_key_changes_only_for_prescaled_files")
-
-
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

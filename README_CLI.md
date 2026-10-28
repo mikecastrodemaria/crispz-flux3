@@ -13,7 +13,7 @@ Common output flags (work with most modes):
 ## Text → Image (txt2img)
 
 ```bash
-# Basic (FLUX.2 Klein: 4 steps; guidance is inert, the model is distilled)
+# Basic (FLUX.3 distilled: 16 steps; guidance is inert, the model is a flow map)
 python app.py --txt2img --prompt "a serene mountain lake, cinematic" \
     --gen-width 1024 --gen-height 1024 --gen-steps 8 --seed 42 \
     --save-mode local --output-dir out
@@ -51,7 +51,7 @@ python app.py --txt2img --prompt "a red cat" \
 
 # Compare checkpoints (partial names resolve case-insensitively), one sheet per seed
 python app.py --txt2img --prompt "..." \
-    --xyz "Checkpoint=FLUX.2-klein-4B, mymodel" --xyz "Seed=42, 1234"
+    --xyz "Checkpoint=black-forest-labs/flux-3-image-klein, mymodel" --xyz "Seed=42, 1234"
 
 # Full-prompt A/B test (each value = a COMPLETE prompt; quotes protect commas).
 # --prompt becomes optional when a Prompt axis is given.
@@ -81,19 +81,19 @@ In the UI, the values fields autosuggest after 3 typed characters (checkpoints/L
 on those axes, `__wildcards__` on the Prompt axes).
 **Ctrl+C assembles a partial sheet** with the cells rendered so far.
 
-## Choose / switch the Klein model
+## Choose / switch the FLUX.3 model
 
 ```bash
 # Single-file checkpoint (Civitai BF16/FP16) as the transformer
 python app.py --txt2img --prompt "..." \
-    --klein-transformer "D:/.../FLUX2/my_klein_finetune.safetensors" --gen-steps 4
+    --flux3-transformer "D:/.../FLUX3/my_flux3_finetune.safetensors" --gen-steps 16
 
 # Transformer from a diffusers repo/folder (keeps base VAE/encoder)
 python app.py --txt2img --prompt "..." \
-    --klein-transformer "<hf-repo-with-a-flux2-transformer>"
+    --flux3-transformer "<hf-repo-with-a-flux3-transformer>"
 
 # Full diffusers base
-python app.py --txt2img --prompt "..." --klein-model "black-forest-labs/FLUX.2-klein-4B"
+python app.py --txt2img --prompt "..." --flux3-model "black-forest-labs/flux-3-image-klein-base"
 ```
 
 ## LoRA (up to 3, combinable)  — `--lora NAME[:WEIGHT]`

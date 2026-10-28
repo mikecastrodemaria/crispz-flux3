@@ -5,9 +5,8 @@ have the same cause and are not fixed the same way:
 
   LOADING      the pipeline ready to generate, from an empty state (free_vram before
                every model, otherwise we would be measuring a warm transformer swap, not
-               a load). That is where the disk read, the FP8/INT8 dequantisation -- or
-               its cache, see rebuild_cache.bat -- and the setting up of the offload get
-               paid for.
+               a load). That is where the disk read, the FP8/INT8 dequantisation -- and the
+               setting up of the offload get paid for.
   1st IMAGE    the first generation AFTER loading. Always slower: CUDA kernels to
                compile, an empty embeddings cache, weights moving onto the GPU.
                Confusing it with the steady state makes one conclude "this model is
@@ -197,11 +196,10 @@ def _dequant_state(path):
     cached model with one that is not does not measure the models."""
     if not os.path.isfile(path) or not str(path).lower().endswith(".safetensors"):
         return "-"
+    # crispz-flux3 has no dequant cache (FLUX.3 ships fp8r / nvfp4 builds): the column
+    # only says whether a file is a ComfyUI scaled quant, handed to diffusers as is.
     try:
-        if not P._safetensors_dequant(path):
-            return "-"                      # bf16: nothing to dequantise
-        c = P._dequant_cache_path(path)
-        return "warm" if c and os.path.isfile(c) else "cold"
+        return "comfy-quant" if P._safetensors_dequant(path) else "-"
     except Exception:
         return "-"
 
@@ -258,7 +256,6 @@ def _write_report(rows):
         "",
         "- **Cache**: the state of the dequantisation cache BEFORE the test. `cold` = the",
         "  load includes the FP8/INT8 -> bf16 conversion (minutes). A `load` column only",
-        "  compares at equal cache -- `rebuild_cache.bat` makes them all warm.",
         "",
         "> The OS file cache weighs on the `load` column too: the same model, measured",
         "> twice in a row, went from 24.1 s to 10.3 s with nothing else touched. So the",

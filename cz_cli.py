@@ -386,7 +386,7 @@ def cli_main(argv=None):
                              "reading -i. Add --upscale to also run ESRGAN + refine.")
     parser.add_argument("--gen-width", type=int, default=1024, help="txt2img width (mult. of 16)")
     parser.add_argument("--gen-height", type=int, default=1024, help="txt2img height (mult. of 16)")
-    parser.add_argument("--gen-steps", type=int, default=8, help="txt2img steps (klein: 4)")
+    parser.add_argument("--gen-steps", type=int, default=8, help="txt2img steps (FLUX.3 distilled: 16, base: 50)")
     parser.add_argument("--negative", default="", help="Negative prompt (txt2img)")
     parser.add_argument("--upscale", action="store_true",
                         help="In --txt2img: run the ESRGAN + refine upscale on the generated image")
@@ -469,14 +469,15 @@ def cli_main(argv=None):
     parser.add_argument("--esrgan-dir", help="Override ESRGAN_DIR for this run")
     # --zimage-* are the old names (crispz-studio / Z-Image): kept as hidden aliases
     # so as to break no existing script, but absent from --help.
-    parser.add_argument("--klein-model", "--zimage-model", dest="zimage_model",
+    parser.add_argument("--flux3-model", "--klein-model", "--zimage-model", dest="zimage_model",
                         help="Override the model: HF repo, diffusers folder, OR a single-file "
                              ".safetensors (Civitai) used as the transformer (VAE+encoder from base).")
-    parser.add_argument("--klein-transformer", "--zimage-transformer", dest="zimage_transformer",
+    parser.add_argument("--flux3-transformer", "--klein-transformer", "--zimage-transformer",
+                        dest="zimage_transformer",
                         help="Single-file .safetensors transformer override (Civitai), keeping "
-                             "the VAE + Qwen3 encoder from --klein-model / the base repo.")
+                             "the VAE + Qwen3-VL encoder from --flux3-model / the base repo.")
     parser.add_argument("--save-paths", action="store_true",
-                        help="Save --esrgan-dir and --klein-model to preferences.json")
+                        help="Save --esrgan-dir and --flux3-model to preferences.json")
     # Reports
     parser.add_argument("--list-models", action="store_true", help="List ESRGAN models then exit")
     parser.add_argument("--time-log", default=None,
