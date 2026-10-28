@@ -63,6 +63,16 @@ out/
 output/
 *.tsv
 
+# --- Local-only working files: kept on disk, never on GitHub (2026-10-28) ---
+REFACTOR.md
+VALIDATION.md
+run_quality_rtx5090.bat
+tools/ab_refine_guards.py
+tools/check_klein_extras.py
+tests/test_klein_e2e.py
+# crispz-klein's screenshots; the FLUX.3 ones will come from the 5090 e2e
+assets/
+
 # --- Local test images (experiments, not versioned) ---
 tests/*
 # ... but the test SUITE is versioned (new test files were lost to a bare 'tests/' once:

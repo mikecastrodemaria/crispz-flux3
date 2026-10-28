@@ -9,7 +9,6 @@ to promising a capability that breaks -- exactly what the house rule forbids
 
 So `EDIT_LORA_SPECS` holds ONLY LoRAs verified as loadable on FLUX.2 Klein; the
 upstream catalogue is kept just below, commented out, as a merge reference.
-`tools/check_klein_extras.py` watches for new releases.
 
 All the machinery (the lazy download, the path resolution, the local index, the
 config overrides) is UNCHANGED and works as soon as an entry is added.

@@ -10,15 +10,11 @@
 > [crispz](https://github.com/mikecastrodemaria/crispz)).
 > Current version: **1.18.5** — see [CHANGELOG.md](CHANGELOG.md).
 
-![crispz-flux3 — FLUX.2 Klein creation + editing studio](assets/screenshot.png)
-
-*The Text → Image tab, real capture: a 1024×1024 comic panel in **1.6 s** at 4 steps.*
-
 ### What it produces
 
 | Generate | Edit (1 reference) | Inpaint |
 |---|---|---|
-| ![generate](assets/sample-gen.jpg) | ![edit](assets/sample-edit.jpg) | ![inpaint](assets/sample-inpaint.jpg) |
+| (captures and timings to come from the FLUX.3 run on the RTX 5090) | | |
 | `gen` — 4 steps, 2.0 s | `edit` — *"make it daytime, sunny blue sky"*, 2.8 s | `inpaint` — a moon painted into the masked corner, 2.8 s |
 
 The middle image is the point of this fork: the scene changes completely while the
