@@ -13,6 +13,9 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
   a stray LoRA) are listed as refused in the plan with their reason instead of failing
   mid-run, and the report's Cache column becomes Format (bf16 / comfy-quant / gguf /
   bfl fp8r). Found by Mike's first FLUX.3 bench on the 5090 (2026-10-28).
+- The Models menu names a GGUF by its real file type: `general.file_type` is
+  llama.cpp's enum (15 = Q4_K_M), the table read it as the ggml tensor-type enum (15 =
+  Q8_K), so a q4KM file showed as "GGUF Q8_K". The gguf package's enum is now the source.
 - A single-file transformer keeps its QK norms (`norm_q` / `norm_k`) in float32, as
   `from_pretrained` does: diffusers 0.42.1's `from_single_file` cast them to bf16, and
   every denoising step then ran `rms_norm` out of the fused kernel (the "Mismatch dtype

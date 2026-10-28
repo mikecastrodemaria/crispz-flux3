@@ -2509,10 +2509,21 @@ _FILE_INFO_CACHE = {}
 _FAMILY_LABEL = {"flux3": "FLUX.3", "flux2": "FLUX.2"}
 _DTYPE_LABEL = {"BF16": "bf16", "F16": "fp16", "F32": "fp32", "F8_E4M3": "FP8",
                 "F8_E5M2": "FP8", "I8": "INT8", "I16": "INT16"}
-# ggml file types, the handful a diffusion checkpoint actually uses.
+# `general.file_type` is llama.cpp's LlamaFileType enum ("MOSTLY_Q4_K_M"...), NOT the
+# ggml tensor-type enum: the two share their first values (0 F32, 1 F16, 2 Q4_0...) and
+# diverge from 10 on. The first table here was the tensor-type one, and labelled Mike's
+# q4KM file (file_type 15 = MOSTLY_Q4_K_M) "GGUF Q8_K" in the Models menu (2026-10-28).
+# Read from the gguf package when it has the enum, the table below as a fallback.
 _GGUF_FTYPE = {0: "F32", 1: "F16", 2: "Q4_0", 3: "Q4_1", 7: "Q8_0", 8: "Q5_0", 9: "Q5_1",
-               10: "Q2_K", 11: "Q3_K", 12: "Q4_K", 13: "Q5_K", 14: "Q6_K", 15: "Q8_K",
-               30: "BF16"}
+               10: "Q2_K", 11: "Q3_K_S", 12: "Q3_K_M", 13: "Q3_K_L", 14: "Q4_K_S",
+               15: "Q4_K_M", 16: "Q5_K_S", 17: "Q5_K_M", 18: "Q6_K", 30: "IQ4_XS",
+               32: "BF16"}
+try:
+    from gguf import LlamaFileType as _LlamaFileType
+    _GGUF_FTYPE.update({int(e.value): e.name.replace("MOSTLY_", "").replace("ALL_", "")
+                        for e in _LlamaFileType})
+except Exception:
+    pass
 
 
 def _quant_short(name):

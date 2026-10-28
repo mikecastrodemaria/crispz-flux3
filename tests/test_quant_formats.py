@@ -396,3 +396,23 @@ if __name__ == "__main__":
         fn()
         print(f"OK {fn.__name__}")
     print("All quant-format tests passed.")
+
+
+def test_gguf_file_type_reads_llama_cpp_enum_not_the_tensor_types():
+    """`general.file_type` is llama.cpp's LlamaFileType (15 = MOSTLY_Q4_K_M), not the ggml
+    tensor-type enum (15 = Q8_K): Mike's q4KM file showed as "GGUF Q8_K" in the Models
+    menu (2026-10-28). The label must follow the file's own enum."""
+    import numpy as np
+    from gguf import GGUFWriter, LlamaFileType
+    p = os.path.join(TMP, "ftype_q4km.gguf")
+    w = GGUFWriter(p, "flux3")
+    w.add_file_type(LlamaFileType.MOSTLY_Q4_K_M)
+    for t in _FLUX3_SIG:
+        w.add_tensor(t, np.zeros((4, 32), dtype=np.float32))
+    w.write_header_to_file()
+    w.write_kv_data_to_file()
+    w.write_tensors_to_file()
+    w.close()
+    assert cz_pipeline._gguf_ftype(p) == "Q4_K_M"
+    assert cz_pipeline.model_info(p)["format"] == "GGUF Q4_K_M"
+    assert cz_pipeline._GGUF_FTYPE[18] == "Q6_K" and cz_pipeline._GGUF_FTYPE[7] == "Q8_0"
