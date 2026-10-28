@@ -4329,7 +4329,7 @@ def build_ui():
                     input_mode = gr.Radio(
                         ["Upscale / img2img"] + ([EDIT_MODE] if omni_on else []),
                         value="Upscale / img2img", label="Input mode", visible=omni_on,
-                        info="Edit (references) = FLUX.3 edits from the images of the Edit tab, cited in the prompt as <ref_image_0>, <ref_image_1>...")
+                        info="Edit (references) = FLUX.3 edits from the images of the Edit tab, cited in the prompt as `<ref_image_0>`, `<ref_image_1>`... (no tag needed with a single image)")
                     with gr.Tabs():
                         with gr.Tab("Upscale or img2img"):
                             with gr.Row():
@@ -4487,8 +4487,9 @@ def build_ui():
                                         "*Edit an image from an instruction: put it in **Ref 1**, "
                                         "add up to 3 more references, and cite them in the prompt "
                                         "as `<ref_image_0>` (Ref 1), `<ref_image_1>` (Ref 2)... "
-                                        "e.g. *put the jacket of <ref_image_1> on the person in "
-                                        "<ref_image_0>*. FLUX.3 takes up to 10 references; the CLI "
+                                        "e.g. *put the jacket of `<ref_image_1>` on the person in "
+                                        "`<ref_image_0>`*. With a single image no tag is needed: "
+                                        "just say what to change. FLUX.3 takes up to 10 references; the CLI "
                                         "and the protocol accept them all, this tab offers 4 slots. "
                                         "Then click **Edit** below (or Generate with Input mode = "
                                         "Edit (references)). Steps/guidance: Settings.*")
