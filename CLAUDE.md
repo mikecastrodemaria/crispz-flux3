@@ -59,6 +59,10 @@ Pièges déjà rencontrés :
 - `.gitignore` excluait tout `tests/` (règle héritée pour des images locales) : le premier
   `tests/test_flux3_adapter.py` n'a jamais été commité et a dû être réécrit. Corrigé en
   `tests/*` + `!tests/*.py` ; vérifier `git status` après tout nouveau fichier de test.
+- rembg contre gradio (28/10) : tout rembg depuis 2.0.75 exige pillow>=12.1, gradio 5.50 exige
+  pillow<12 : demandés ensemble, pip et uv refusent (ResolutionImpossible). Les installeurs
+  filtrent pillow, onnxruntime ET rembg du lock, posent Pillow 13 en --no-deps, puis rembg
+  seul ; le launcher Pinokio installe requirements-extra.txt après Pillow 13.
 - torchvision doit venir du MÊME index que torch (`+cpu`), sinon
   `operator torchvision::nms does not exist` casse tout import transformers.
 - diffusers 0.42.1 exige `huggingface-hub>=1.32`, incompatible avec transformers 4.x

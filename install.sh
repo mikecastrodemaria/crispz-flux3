@@ -140,27 +140,39 @@ if [ "$REQFILE" = "requirements-lock.txt" ]; then
     echo "  (includes torch cu128, ~3.5 GB to download the first time)"
 fi
 # Pillow is filtered out of the file: gradio 5.50 declares pillow<12 and would refuse
-# to resolve with the 12.x pin. It is installed just after, with --no-deps. The pin
+# to resolve with the 13.x pin. It is installed just after, with --no-deps. The pin
 # stays in the lock so that Dependabot sees the fixed version.
 # onnxruntime (the CPU build) is filtered out too: rembg pulls it as a dependency, and
 # once installed it HIDES onnxruntime-gpu at import time (the same module name, the CPU
 # one wins) -> faceswap, GFPGAN/CodeFormer and rembg fall back silently to the CPU
 # although onnxruntime-gpu is there. We keep the GPU build only.
+# rembg is filtered out too and installed AFTER Pillow 13: every rembg since 2.0.75
+# requires pillow>=12.1 while gradio 5.50 requires pillow<12, so no resolver can install
+# the three together (ResolutionImpossible, seen 2026-10-28). Installed last, pip
+# resolves rembg against the Pillow 13 already in place and only WARNS about gradio's
+# bound, which this code base ignores on purpose.
 REQTMP="${TMPDIR:-/tmp}/cz_req_nopillow.txt"
-grep -vE '^(pillow|onnxruntime)==' "$REQFILE" > "$REQTMP"
+grep -vE '^(pillow|onnxruntime|rembg)==' "$REQFILE" > "$REQTMP"
 $RUNPY -m pip install -r "$REQTMP"
 echo
 
 # 5bis) Pillow, installed APART and with --no-deps.
 #   gradio 5.50 declares "pillow<12.0", but the Pillow CVEs (including the ones
 #   reachable through the images the user opens) are only fixed in 12.x. That bound
-#   of gradio's is conservative: checked against this code base, Pillow 12 works.
+#   of gradio's is conservative: checked against this code base, Pillow 13 works.
 #   So we install it afterwards, without triggering again the resolution that would
 #   refuse the combination.
 PILLOW_PIN="pillow==13.0.0"
 echo "Installing $PILLOW_PIN (apart: works around gradio's pillow<12 bound)..."
 $RUNPY -m pip install --no-deps --upgrade "$PILLOW_PIN" \
     || echo "[WARN] Pillow install failed -> inherited version kept."
+echo
+
+# 5ter) rembg (the Remove BG tab), after Pillow 13: see the note above step 5.
+REMBG_PIN="rembg==2.0.86"
+echo "Installing $REMBG_PIN (after Pillow 13: rembg wants pillow>=12.1, gradio <12)..."
+$RUNPY -m pip install "$REMBG_PIN" \
+    || echo "[WARN] rembg install failed -> the Remove BG tab stays off."
 echo
 
 # 6) Check that diffusers exposes the model family (FLUX.3 modular blocks)

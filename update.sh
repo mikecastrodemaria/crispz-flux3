@@ -75,9 +75,11 @@ else
   # Pillow is outside the lock (gradio's pillow<12 bound) -> installed apart,
   # otherwise an update would REGRESS the fixed version. See install.sh.
   REQTMP="${TMPDIR:-/tmp}/cz_req_nopillow.txt"
-  grep -v '^pillow==' "$REQFILE" > "$REQTMP"
+  grep -vE '^(pillow|onnxruntime|rembg)==' "$REQFILE" > "$REQTMP"
   if "$RUNPY" -m pip install -r "$REQTMP"; then
+    # Pillow first, then rembg (pillow>=12.1) against it: see install.sh step 5ter.
     "$RUNPY" -m pip install --no-deps --upgrade "pillow==13.0.0" >/dev/null 2>&1 || true
+    "$RUNPY" -m pip install "rembg==2.0.86" >/dev/null 2>&1 || true
   else
     echo "[ERROR] pip install failed. Possible restore:"
     echo "  $RUNPY -m pip install -r $SNAP"

@@ -85,6 +85,10 @@ tqdm==4.70.1
 psutil==7.2.2
 
 # the optional tabs (Remove BG, Face Swap). rembg 2.0.82+ closes its Dependabot alerts.
+# rembg is FILTERED OUT of the lock install by install.bat/.sh, like pillow, and installed
+# after Pillow 13: it requires pillow>=12.1 and gradio 5.50 pillow<12, an impossible
+# resolution when the three are asked together (seen 2026-10-28). The pin stays here
+# so that Dependabot sees it.
 rembg==2.0.86
 insightface==2.1
 onnxruntime==1.31.1

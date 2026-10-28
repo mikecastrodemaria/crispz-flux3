@@ -156,8 +156,13 @@ REM onnxruntime (the CPU build) is filtered out too: rembg pulls it as a depende
 REM and once installed it HIDES onnxruntime-gpu at import time (the same module name,
 REM the CPU one wins) -^> faceswap, GFPGAN/CodeFormer and rembg fall back silently
 REM to the CPU although onnxruntime-gpu is there. We keep the GPU build only.
+REM rembg is filtered out too and installed AFTER Pillow 13: every rembg since 2.0.75
+REM requires pillow^>=12.1 while gradio 5.50 requires pillow^<12, so no resolver can
+REM install the three together ^(ResolutionImpossible, seen 2026-10-28^). Installed last,
+REM pip resolves rembg against the Pillow 13 already in place and only WARNS about
+REM gradio's bound, which this code base ignores on purpose.
 set "REQTMP=%TEMP%\cz_req_nopillow.txt"
-findstr /V /B /C:"pillow==" /C:"onnxruntime==" "!REQFILE!" > "!REQTMP!"
+findstr /V /B /C:"pillow==" /C:"onnxruntime==" /C:"rembg==" "!REQFILE!" > "!REQTMP!"
 !RUNPY! -m pip install -r "!REQTMP!"
 if errorlevel 1 (
     echo [ERROR] pip install failed. Check the log above.
@@ -176,6 +181,15 @@ set "PILLOW_PIN=pillow==13.0.0"
 echo Installing !PILLOW_PIN! ^(apart: works around gradio's pillow^<12 bound^)...
 !RUNPY! -m pip install --no-deps --upgrade "!PILLOW_PIN!"
 if errorlevel 1 echo [WARN] Pillow install failed -^> inherited version kept.
+echo.
+
+REM 5ter) rembg (the Remove BG tab), after Pillow 13: see the note above step 5. The
+REM   version is the lock's; in non-isolated mode requirements-extra.txt asks for the
+REM   same ^(^>=2.0.82, the Dependabot fix^).
+set "REMBG_PIN=rembg==2.0.86"
+echo Installing !REMBG_PIN! ^(after Pillow 13: rembg wants pillow^>=12.1, gradio ^<12^)...
+!RUNPY! -m pip install "!REMBG_PIN!"
+if errorlevel 1 echo [WARN] rembg install failed -^> the Remove BG tab stays off.
 echo.
 
 REM 6) Check that diffusers exposes the model family (FLUX.3 modular blocks)

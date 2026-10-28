@@ -102,12 +102,14 @@ if "!NEEDDEPS!"=="0" (
 ) else (
     echo Dependencies: updating from !REQFILE! ...
     set "REQTMP=%TEMP%\cz_req_nopillow.txt"
-    findstr /V /B /C:"pillow==" "!REQFILE!" > "!REQTMP!"
+    findstr /V /B /C:"pillow==" /C:"onnxruntime==" /C:"rembg==" "!REQFILE!" > "!REQTMP!"
     !RUNPY! -m pip install -r "!REQTMP!"
     if not errorlevel 1 (
-        REM Pillow is outside the lock (gradio's pillow^<12 bound) -> installed apart,
-        REM otherwise an update would REGRESS the fixed version. See install.bat.
+        REM Pillow and rembg are outside the lock install (gradio's pillow^<12 bound
+        REM against rembg's pillow^>=12.1) -> installed apart, Pillow first, otherwise
+        REM an update would REGRESS the fixed version or refuse to resolve. See install.bat.
         !RUNPY! -m pip install --no-deps --upgrade "pillow==13.0.0" >nul 2>&1
+        !RUNPY! -m pip install "rembg==2.0.86" >nul 2>&1
     )
     if errorlevel 1 (
         echo [ERROR] pip install failed. The environment may be inconsistent.
