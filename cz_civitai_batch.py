@@ -29,7 +29,11 @@ import cz_core
 from cz_core import CONFIG, _prefs, HERE
 import cz_civitai
 
-_EXTS = (".safetensors", ".ckpt", ".pt", ".sft")
+# .gguf included: the Asset Browser's Models tab lists the GGUF checkpoints (the quantized
+# FLUX.3 builds people download from CivitAI are GGUF as often as safetensors), and
+# CivitAI indexes them by SHA256 like any other file. Left out, the batch said "done" and
+# the GGUF rows stayed without preview or examples, with nothing to explain why (2026-10-28).
+_EXTS = (".safetensors", ".gguf", ".ckpt", ".pt", ".sft")
 _BATCH_CFG = CONFIG.get("civitai_batch") if isinstance(CONFIG.get("civitai_batch"), dict) else {}
 DEFAULT_SLEEP = float(_BATCH_CFG.get("sleep", 0.5))
 DEFAULT_CHECK_UPDATES = bool(_BATCH_CFG.get("check_updates", True))
@@ -196,6 +200,35 @@ def run(kind="all", loras_dir=None, checkpoints_dir=None, shard=None, api_key=No
                   sleep=sleep, check_updates=check_updates, progress=progress)
 
 
+def hashing_note(files):
+    """One line saying how much has to be READ before CivitAI can even be asked, or ""
+    when every hash is already cached.
+
+    CivitAI only knows a file by its SHA256, and that means reading the whole file once:
+    on 2026-10-28 an 11 GB bf16 checkpoint on a mechanical drive took about three minutes
+    at 60 MB/s, five checkpoints a quarter of an hour, with nothing on screen but a
+    percentage that moved slowly. People read that as "it does not work". The hash is
+    cached in the sidecar afterwards, so this is paid once per file."""
+    todo, size = 0, 0
+    for p in files:
+        try:
+            if cz_civitai.model_sha256(p, allow_compute=False):
+                continue
+            size += os.path.getsize(p)
+            todo += 1
+        except Exception:
+            continue
+    if not todo:
+        return ""
+    gb = size / 1024 ** 3
+    # 60 MB/s is the mechanical-drive figure measured above; an NVMe is 10 to 30 times faster
+    slow_min = size / (60 * 1024 ** 2) / 60
+    return (f"[civitai-batch] {todo} file(s) have no cached SHA256 yet: {gb:.1f} GB to read "
+            f"before CivitAI can be asked (first time only, the hash is kept in the "
+            f".civitai.json sidecar). Up to about {max(1, round(slow_min))} min on a hard "
+            f"disk, well under a minute on an NVMe.")
+
+
 def _cli_progress(i, n, name, phase, text):
     # a single line rewritten in place: [12/48] modelname: Downloading preview…
     sys.stderr.write(f"\r[{i}/{n}] {text}".ljust(90)[:90])
@@ -241,12 +274,29 @@ def main(argv=None):
         return 0
     print(f"[civitai-batch] {len(files)} model(s) — kind={a.kind}, shard={a.shard or 'all'}, "
           f"force={a.force}, only_missing={not a.all_files}, sleep={a.sleep}s")
+    note = hashing_note(files)
+    if note:
+        print(note)
     s = enrich(files, api_key=a.api_key, overwrite=a.force,
                only_missing=(not a.all_files and not a.force), sleep=a.sleep,
                check_updates=(not a.no_check_updates), progress=_cli_progress)
     sys.stderr.write("\n")
     print(f"[civitai-batch] done: enriched={s['enriched']} skipped={s['skipped']} "
           f"updated={s['updated']} failed={s['failed']}")
+    # The Asset Browser reads _index/models.json and loras.json, rebuilt when the UI's own
+    # "Fetch all missing" finishes but NOT by this script until now: after a .bat run the
+    # browser kept showing placeholders for models whose sidecar and preview were on disk,
+    # until the tab was closed and reopened (seen 2026-10-28). cz_assetbrowser imports no
+    # torch, so the rebuild costs nothing here.
+    try:
+        import cz_assetbrowser
+        from cz_core import DEFAULT_OUTPUT_DIR
+        loras, cks = resolve_dirs(a.loras_dir, a.checkpoints_dir)
+        cz_assetbrowser.ab_build_catalog(DEFAULT_OUTPUT_DIR, loras, cks)
+        print("[civitai-batch] Asset Browser catalogue refreshed (reload the tab to see it).")
+    except Exception as e:  # noqa: BLE001 - a catalogue miss must not fail the batch
+        print(f"[civitai-batch] catalogue not refreshed ({e}); it rebuilds when the Asset "
+              f"Browser is opened again.")
     for w in s["warnings"][:50]:
         print(f"  - {w}")
     # a non-zero exit code only when EVERYTHING failed (useful for a .bat)

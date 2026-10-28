@@ -52,6 +52,11 @@ diffusers 0.42.1, transformers 5.21) : `.venv-test/Scripts/python -m pytest test
 --ignore=tests/test_klein_e2e.py`.
 
 Pièges déjà rencontrés :
+- **Jamais de test GPU pendant que l'app de Mike tourne** (28/10) : un rendu de test lancé par
+  Claude a chargé un second FLUX.3 (19 Go) à côté de celui de l'app ; 38 Go sur 32, la
+  carte a débordé en mémoire partagée (5 Go) et l'app de Mike a planté. `nvidia-smi` au
+  début ne suffit pas (l'app charge le modèle à la première image) : demander à Mike de
+  fermer l'app, ou qu'il donne son feu vert, avant tout `.venv-lock` sur la carte.
 - `boot_check.bat` sans `.venv` (28/10) : le diagnostic tournait sur `py -3.10` et `run.bat`
   lançait `py -3.13` sans gradio, d'où un crash au démarrage. Les trois .bat suivent la
   même règle (`.venv`, puis `env` de Pinokio, puis Python 3.13 > 3.12 > 3.11) et la
