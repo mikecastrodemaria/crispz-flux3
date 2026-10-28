@@ -127,7 +127,8 @@ def test_union_dedupes_on_path_first_weight_wins():
 def _lycoris(name, suffixes):
     sd = {}
     for i in range(6):
-        b = f"diffusion_model.double_blocks.{i}.img_attn.proj"
+        # FLUX.3 block names: on double_blocks the family guard refuses the file first
+        b = f"diffusion_model.mode_blocks.{i}.img_attn.proj"
         sd[b + ".alpha"] = torch.tensor(1.0)
         for s in suffixes:
             sd[f"{b}.{s}"] = torch.zeros(4, 4)
@@ -176,27 +177,23 @@ def test_a_real_peft_lora_still_passes():
 # ---------------------------------------------------------------------------
 
 def _lora_file(name, dtype, scaled=True):
-    """A fake FLUX.2 LoRA in the dtype asked for; `scaled` adds the factors."""
+    """A fake FLUX.3 LoRA in the dtype asked for; `scaled` adds the factors."""
     sd = {}
     for i in range(4):
-        b = f"transformer.transformer_blocks.{i}.attn.to_q"
-        sd[b + ".lora_A.weight"] = torch.zeros(8, 4096, dtype=dtype)
-        sd[b + ".lora_B.weight"] = torch.zeros(4096, 8, dtype=dtype)
+        b = f"transformer.mode_blocks.{i}.attn.to_q"
+        sd[b + ".lora_A.weight"] = torch.zeros(8, 3072, dtype=dtype)
+        sd[b + ".lora_B.weight"] = torch.zeros(3072, 8, dtype=dtype)
         if scaled:
-            sd[b + ".lora_B.weight_scale"] = torch.ones(4096, 1)
+            sd[b + ".lora_B.weight_scale"] = torch.ones(3072, 1)
     p = os.path.join(TMP, name)
     save_file(sd, p)
     return p
 
 
 def _with_9B_base(fn):
-    old = P.BASE_REPO
-    P.BASE_REPO = "test-only/FLUX.2-klein-9B"
-    P._BASE_DIM_CACHE[P.BASE_REPO] = 4096
-    try:
-        return fn()
-    finally:
-        P.BASE_REPO = old
+    """Kept for the diff with crispz-klein: FLUX.3 has one width, there is no base to
+    fake any more, the guard reads the family off the file alone."""
+    return fn()
 
 
 def test_a_bf16_lora_still_passes():
@@ -221,21 +218,22 @@ def test_an_int8_lora_is_refused_too():
     print("OK test_an_int8_lora_is_refused_too")
 
 
-def test_the_variant_check_still_comes_first():
-    """A LoRA that is both 4B AND fp8 must be told about the VARIANT: it is the refusal
-    that carries the useful instruction (change base), and the format would change nothing
-    there."""
+def test_the_family_check_still_comes_first():
+    """A LoRA that is both FLUX.2 AND fp8 must be told about the FAMILY: it is the refusal
+    that carries the useful instruction (it runs in crispz-klein), and the format would
+    change nothing there."""
     sd = {}
     for i in range(4):
         b = f"transformer.transformer_blocks.{i}.attn.to_q"
         sd[b + ".lora_A.weight"] = torch.zeros(8, 3072, dtype=torch.float8_e4m3fn)
         sd[b + ".lora_B.weight"] = torch.zeros(3072, 8, dtype=torch.float8_e4m3fn)
         sd[b + ".lora_B.weight_scale"] = torch.ones(3072, 1)
-    p = os.path.join(TMP, "q_fp8_4B.safetensors")
+    p = os.path.join(TMP, "q_fp8_flux2.safetensors")
     save_file(sd, p)
-    why = _with_9B_base(lambda: P._lora_unsupported(p))
-    assert why and "4B" in why and "switch the base model" in why, why
-    print("OK test_the_variant_check_still_comes_first")
+    why = P._lora_unsupported(p)
+    assert why and "FLUX.2" in why and "crispz-klein" in why, why
+    assert "FP8" not in why, why
+    print("OK test_the_family_check_still_comes_first")
 
 
 def test_alpha_keys_are_folded_and_dropped():
@@ -289,6 +287,6 @@ if __name__ == "__main__":
                test_a_bf16_lora_still_passes,
                test_an_fp8_lora_is_refused_and_points_at_bf16,
                test_an_int8_lora_is_refused_too,
-               test_the_variant_check_still_comes_first):
+               test_the_family_check_still_comes_first):
         fn()
     print("All LoRA dialect / namespace tests passed.")

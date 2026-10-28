@@ -98,43 +98,49 @@ def test_trimming_twice_changes_nothing():
 
 
 def test_the_budget_follows_the_deed_not_the_intent():
-    """The bug that cost a full card: 4 GB deducted from a pruning never done."""
-    old_repo, old_flag = P.BASE_REPO, P._ENCODER_TRIMMED
-    P.BASE_REPO = "test-only/FLUX.2-klein-9B"
-    P._BASE_DIM_CACHE[P.BASE_REPO] = 4096
+    """The bug that cost a full card on klein: 4 GB deducted from a pruning never done.
+    On FLUX.3 the pruning is never done (Qwen3-VL, see _trim_text_encoder), so the flag
+    must change NOTHING in the budget, and the budget is the precision's figure."""
+    old = (P.BASE_REPO, P._ENCODER_TRIMMED, P.ZIMAGE_TRANSFORMER, P.PRECISION)
+    P.BASE_REPO = "black-forest-labs/flux-3-image-klein"
     P.ZIMAGE_TRANSFORMER = None
+    P.PRECISION = "bf16"
     try:
         P._ENCODER_TRIMMED = False
         whole = P._base_vram_need_gb()
         P._ENCODER_TRIMMED = True
         trimmed = P._base_vram_need_gb()
-        assert abs((whole - trimmed) - P._ENCODER_TRIM_GB["9B"]) < 1e-6, (whole, trimmed)
-        assert whole > trimmed, (whole, trimmed)
+        assert whole == trimmed, (whole, trimmed)
+        assert abs(whole - (P._FLUX3_REST_GB + P._FLUX3_TRANSFORMER_GB["bf16"])) < 1e-6, whole
+        P.PRECISION = "nvfp4"
+        assert P._base_vram_need_gb() < whole
     finally:
-        P.BASE_REPO, P._ENCODER_TRIMMED = old_repo, old_flag
+        P.BASE_REPO, P._ENCODER_TRIMMED, P.ZIMAGE_TRANSFORMER, P.PRECISION = old
     print("OK test_the_budget_follows_the_deed_not_the_intent")
 
 
-def test_a_trimmed_9B_still_gets_the_offload_it_needs():
-    """29.7 GB of weights on a 31.8 card leave nothing to diffuse with. The margin is
-    ABSOLUTE: a percentage tightens on the small cards, whereas the CUDA context and the
-    activations cost the same everywhere."""
-    old = (P.BASE_REPO, P._ENCODER_TRIMMED, P.OFFLOAD_MODE, P.DEVICE, P._total_vram_gb)
-    P.BASE_REPO = "test-only/FLUX.2-klein-9B"
-    P._BASE_DIM_CACHE[P.BASE_REPO] = 4096
-    P.ZIMAGE_TRANSFORMER = None
-    P._ENCODER_TRIMMED = True
-    P.OFFLOAD_MODE = "none"
-    P.DEVICE = "cuda"
+def test_the_trim_on_flux3_is_announced_not_silent():
+    """On a Flux3Pipe the function has nothing it can prune yet; it must say so, and the
+    flag that feeds the budget must stay False."""
+    import cz_flux3
+    lines = []
+    real_log = P._log
+    P._log = lambda m: lines.append(str(m))
+
+    class _Pipe(cz_flux3.Flux3Pipe):          # no modular pipeline needed for this path
+        def __init__(self):
+            pass
+    old = (P._ENCODER_TRIMMED, P.TRIM_TEXT_ENCODER)
     try:
-        P._total_vram_gb = lambda: 31.8
-        assert P._effective_offload() == "model", "32 GB: the offload must be kept"
-        P._total_vram_gb = lambda: 48.0
-        assert P._effective_offload() == "none", "48 GB: now it really does fit"
+        P.TRIM_TEXT_ENCODER = True
+        P._ENCODER_TRIMMED = True
+        P._trim_text_encoder(_Pipe())
+        assert P._ENCODER_TRIMMED is False
+        assert any("NOT trimmed" in m and "Qwen3-VL" in m for m in lines), lines
     finally:
-        (P.BASE_REPO, P._ENCODER_TRIMMED, P.OFFLOAD_MODE, P.DEVICE,
-         P._total_vram_gb) = old
-    print("OK test_a_trimmed_9B_still_gets_the_offload_it_needs")
+        P._log = real_log
+        P._ENCODER_TRIMMED, P.TRIM_TEXT_ENCODER = old
+    print("OK test_the_trim_on_flux3_is_announced_not_silent")
 
 
 if __name__ == "__main__":

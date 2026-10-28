@@ -1,16 +1,13 @@
-"""Edit-LoRA presets of crispz-klein (1.36.5).
+"""Edit-LoRA presets on crispz-flux3 (0.1.0).
 
-Covers:
-  - every preset names the model it targets (klein-4B or klein-9B) and an advised weight;
-  - Consistence-Edit 9B takes a copy found in a LoRA folder (CivitAI download) as is,
-    without fetching anything from Hugging Face;
-  - the variant guard refuses a 4B LoRA on the 9B and the reverse, with one sentence;
-  - picking a preset in the dropdown applies it at its advised weight and moves the
-    slider there (it stayed at 1.0).
-
-No GPU, no model: LoRA files are tiny fakes with the right shapes.
-
-Run:  .venv/Scripts/python tests/test_edit_lora_presets.py
+The catalogue is EMPTY: no edit-task LoRA exists for FLUX.3 Image Klein yet, and
+crispz-klein's two Consistence-Edit files are FLUX.2 (refused by family). What these tests
+lock down is the machinery around it, so the first FLUX.3 preset works the day it is
+declared:
+  - the shipped catalogue is empty and says nothing it cannot do (no name, no label);
+  - a preset declared in config.txt ('edit_loras') is picked up, by name and adapter name;
+  - a FLUX.2 edit LoRA is refused by the family guard with one sentence;
+  - picking a preset in the UI applies it at ITS advised weight and moves the slider.
 """
 import os
 import sys
@@ -24,34 +21,50 @@ from safetensors.torch import save_file  # noqa: E402
 
 import cz_edit_loras  # noqa: E402
 
-
-def _fake_lora(path, hidden, rank=4):
-    """A tiny LoRA in the original FLUX layout, with a variant's hidden dimension."""
-    save_file({
-        "diffusion_model.double_blocks.0.img_attn.proj.lora_A.weight": torch.zeros(rank, hidden),
-        "diffusion_model.double_blocks.0.img_attn.proj.lora_B.weight": torch.zeros(hidden, rank),
-    }, path)
-    return path
+SPEC = {"repo": "someone/flux3-edit-lora", "weights": "f3_relight.safetensors",
+        "adapter_name": "relight-f3", "prompt": "Relight the scene with a warm sunset.",
+        "inputs": 1, "base": "flux3", "weight": 0.7}
 
 
-def test_every_preset_names_its_model_and_weight():
-    for name in cz_edit_loras.names():
-        s = cz_edit_loras.spec(name)
-        assert s.get("base") in ("klein-4B", "klein-9B"), (name, s.get("base"))
-        assert 0.0 < float(s.get("weight", 0)) <= 1.5, (name, s.get("weight"))
-    assert cz_edit_loras.spec("Consistence-Edit")["base"] == "klein-4B"
-    s9 = cz_edit_loras.spec("Consistence-Edit 9B")
-    assert s9["base"] == "klein-9B" and s9["repo"] == "lrzjason/Consistance_Edit_Lora"
-    assert s9["weights"] == "f2k_9B_lcs_consist_20260415.safetensors"
-    assert cz_edit_loras.spec("consistence-edit-9b") is s9      # by adapter_name too
+class _Declared:
+    """A preset declared through config 'edit_loras', the way a user would."""
+
+    def __enter__(self):
+        self.old = cz_edit_loras.SPECS
+        cz_edit_loras.SPECS = cz_edit_loras._apply_config_overrides({})
+        cz_edit_loras.CONFIG["edit_loras"] = {"Relight F3": dict(SPEC)}
+        cz_edit_loras.SPECS = cz_edit_loras._apply_config_overrides({})
+        return self
+
+    def __exit__(self, *exc):
+        cz_edit_loras.CONFIG.pop("edit_loras", None)
+        cz_edit_loras.SPECS = self.old
+        return False
 
 
-def test_consistence_9b_uses_a_local_copy_without_downloading():
+def test_the_shipped_catalogue_is_empty_and_dated():
+    assert cz_edit_loras.EDIT_LORA_SPECS == {}
+    src = open(cz_edit_loras.__file__, encoding="utf-8").read()
+    assert "2026-10-28" in src, "an empty catalogue must say since when, and why"
+    assert cz_edit_loras.speed_names() == []          # no Lightning LoRA either
+
+
+def test_a_config_declared_preset_is_picked_up():
+    with _Declared():
+        assert "Relight F3" in cz_edit_loras.names()
+        s = cz_edit_loras.spec("Relight F3")
+        assert s["repo"] == SPEC["repo"] and float(s["weight"]) == 0.7
+        assert cz_edit_loras.spec("relight-f3") is s      # by adapter_name too
+        assert cz_edit_loras.spec("nope") is None
+        assert cz_edit_loras.catalog()                  # it is announced to the protocol
+
+
+def test_a_local_copy_is_used_without_downloading():
     tmp = tempfile.mkdtemp()
     main, extra = os.path.join(tmp, "loras"), os.path.join(tmp, "civitai")
     os.makedirs(main)
     os.makedirs(extra)
-    copy = os.path.join(extra, "f2k_9B_lcs_consist_20260415.safetensors")
+    copy = os.path.join(extra, SPEC["weights"])
     open(copy, "wb").close()
     real = (cz_edit_loras.lora_dirs, cz_edit_loras.edit_loras_dir, cz_edit_loras._download)
 
@@ -62,36 +75,29 @@ def test_consistence_9b_uses_a_local_copy_without_downloading():
     cz_edit_loras.edit_loras_dir = lambda: os.path.join(main, "_hf-edit")
     cz_edit_loras._download = no_download
     try:
-        assert cz_edit_loras.is_downloaded("Consistence-Edit 9B")
-        assert os.path.samefile(cz_edit_loras.resolve("Consistence-Edit 9B"), copy)
-        assert cz_edit_loras.status_label("Consistence-Edit 9B").endswith("✓")
-        assert not cz_edit_loras.is_downloaded("Consistence-Edit")    # the 4B is not in there
+        with _Declared():
+            assert cz_edit_loras.is_downloaded("Relight F3")
+            assert os.path.samefile(cz_edit_loras.resolve("Relight F3"), copy)
+            assert cz_edit_loras.status_label("Relight F3").endswith("✓")
     finally:
         cz_edit_loras.lora_dirs, cz_edit_loras.edit_loras_dir, cz_edit_loras._download = real
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def test_variant_guard_refuses_the_other_model():
+def test_a_flux2_edit_lora_is_refused_by_family():
     import cz_pipeline
     tmp = tempfile.mkdtemp()
-    l4 = _fake_lora(os.path.join(tmp, "four.safetensors"), 3072)
-    l9 = _fake_lora(os.path.join(tmp, "nine.safetensors"), 4096)
-    key = cz_pipeline.BASE_REPO
-    had, saved = key in cz_pipeline._BASE_DIM_CACHE, cz_pipeline._BASE_DIM_CACHE.get(key)
     try:
-        cz_pipeline._BASE_DIM_CACHE[key] = 4096                # base 9B
-        why = cz_pipeline._lora_unsupported(l4)
-        assert why and "4B" in why, why
-        assert cz_pipeline._lora_unsupported(l9) is None
-        cz_pipeline._BASE_DIM_CACHE[key] = 3072                # base 4B
-        why = cz_pipeline._lora_unsupported(l9)
-        assert why and "9B" in why, why
-        assert cz_pipeline._lora_unsupported(l4) is None
+        l2 = os.path.join(tmp, "consistence_edit_flux2.safetensors")
+        save_file({"diffusion_model.double_blocks.0.img_attn.proj.lora_A.weight": torch.zeros(4, 3072),
+                   "diffusion_model.double_blocks.0.img_attn.proj.lora_B.weight": torch.zeros(3072, 4)}, l2)
+        why = cz_pipeline._lora_unsupported(l2)
+        assert why and "FLUX.2" in why and "crispz-klein" in why, why
+        l3 = os.path.join(tmp, "relight_flux3.safetensors")
+        save_file({"transformer.mode_blocks.0.attn.to_q.lora_A.weight": torch.zeros(4, 3072),
+                   "transformer.mode_blocks.0.attn.to_q.lora_B.weight": torch.zeros(3072, 4)}, l3)
+        assert cz_pipeline._lora_unsupported(l3) is None
     finally:
-        if had:
-            cz_pipeline._BASE_DIM_CACHE[key] = saved
-        else:
-            cz_pipeline._BASE_DIM_CACHE.pop(key, None)
         shutil.rmtree(tmp, ignore_errors=True)
 
 
@@ -102,16 +108,17 @@ def test_picking_a_preset_sets_its_weight_on_the_slider():
     real = (cz_pipeline.set_edit_loras, cz_edit_loras.is_downloaded, cz_ui._edit_lora_choices)
     cz_pipeline.set_edit_loras = lambda slots: applied.append(list(slots))
     cz_edit_loras.is_downloaded = lambda name, index=None: True
-    cz_ui._edit_lora_choices = lambda: ["None", "Consistence-Edit 9B ✓"]
+    cz_ui._edit_lora_choices = lambda: ["None", "Relight F3 ✓"]
     try:
-        dd, note, slider = cz_ui._ui_edit_lora_pick("Consistence-Edit 9B ✓", 1.0,
-                                                    progress=lambda *a, **k: None)
-        assert applied == [[("Consistence-Edit 9B", 0.6)]], applied
-        assert slider.get("value") == 0.6, slider
-        assert "0.6" in note, note
-        # "None": nothing to apply, the slider does not move.
-        dd, note, slider = cz_ui._ui_edit_lora_pick("None", 0.8, progress=lambda *a, **k: None)
-        assert applied[-1] == [] and "value" not in slider, (applied, slider)
+        with _Declared():
+            dd, note, slider = cz_ui._ui_edit_lora_pick("Relight F3 ✓", 1.0,
+                                                        progress=lambda *a, **k: None)
+            assert applied == [[("Relight F3", 0.7)]], applied
+            assert slider.get("value") == 0.7, slider
+            assert "0.7" in note, note
+            # "None": nothing to apply, the slider does not move.
+            dd, note, slider = cz_ui._ui_edit_lora_pick("None", 0.8, progress=lambda *a, **k: None)
+            assert applied[-1] == [] and "value" not in slider, (applied, slider)
     finally:
         cz_pipeline.set_edit_loras, cz_edit_loras.is_downloaded, cz_ui._edit_lora_choices = real
 

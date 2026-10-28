@@ -6,8 +6,22 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
 
 ## 0.1.0-dev : fork of crispz-klein for FLUX.3 Image Klein
 
-Skeleton only: the project is renamed and FORK.md lays out the port. No FLUX.3 code
-yet, the engine is still crispz-klein's FLUX.2 one.
+The port, lot by lot (see CLAUDE.md): the cz_flux3 adapter around the diffusers FLUX.3
+modular pipeline, the guards by model FAMILY instead of hidden width, the FLUX.3
+profiles and presets, the Distilled / Base and Precision selectors, diffusers 0.42.1
+from PyPI with transformers 5 and Python 3.11+.
+
+Tests dropped with the FLUX.2 code they covered, rather than disabled in silence:
+- `tests/test_precache_variants.py`: the ComfyUI FP8/INT8 dequant loader and its disk
+  cache are not ported (FLUX.3 ships its own fp8r / nvfp4 builds, see
+  cz_pipeline._load_transformer), so pre-filling that cache has nothing to test.
+- `test_quant_formats::test_prefixed_single_file_is_loaded_as_a_state_dict`: the same
+  loader (a ComfyUI-prefixed file read into a state dict before from_single_file).
+- `tests/test_klein_e2e.py` (local only): replaced by `tests/test_flux3_e2e.py`.
+- `tests/test_edit_lora_presets.py` is rewritten around an EMPTY catalogue: the two
+  Consistence-Edit presets are FLUX.2 files.
+The other FLUX.2 tests (4B/9B width, "Klein" labels, 4-step profiles) are rewritten
+with the same intention on FLUX.3, in place.
 
 
 ## Unreleased — The image as it forms, in the result gallery

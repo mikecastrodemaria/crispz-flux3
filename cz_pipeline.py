@@ -2318,6 +2318,8 @@ _QWEN_GGUF_SIGNATURE = ("x_embedder.weight", "context_embedder.weight",
 
 def _gguf_layout(path):
     """Layout state of a .gguf's tensors, read from the header (gguf mmap):
+      'flux3'   -> FLUX.3 Image Klein block names (early_stream_modulations, mode_blocks...):
+                   the file this build loads;
       'flux2'   -> the FLUX.2 signature is there: that is PROOF, far more reliable than
                    the declared 'general.architecture' (conversion tools stamp anything --
                    'wan' has been seen on perfectly valid Qwen-Image files);
@@ -2333,6 +2335,10 @@ def _gguf_layout(path):
         names = [t.name for t in GGUFReader(path).tensors]
         if not names:
             return "unknown"
+        # crispz-flux3: a FLUX.3 file is told by its block names (the same reading as
+        # the .safetensors family guard), whatever 'general.architecture' says.
+        if cz_flux3.family_from_keys(names) == "flux3":
+            return "flux3"
         if all(any(n == sig for n in names) for sig in _QWEN_GGUF_SIGNATURE):
             return "flux2"
         if any(n.startswith(_GGUF_OK_PREFIXES) for n in names):

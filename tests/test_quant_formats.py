@@ -149,36 +149,6 @@ def test_bf16_prefixed_is_detected_and_stripped():
     assert cz_pipeline._safetensors_comfy_prefixed(plain) is False
 
 
-def test_prefixed_single_file_is_loaded_as_a_state_dict():
-    """Routing: a prefixed NON-quantised single file has to reach from_single_file as an
-    unprefixed STATE DICT -- handing it the path would send it straight back into the
-    meta-tensor bug."""
-    import diffusers
-    p = _st("route.safetensors", {
-        _W: torch.randn(4, 4, dtype=torch.bfloat16),
-        "model.diffusion_model.x_embedder.weight": torch.randn(4, 4, dtype=torch.bfloat16),
-    })
-    seen = {}
-
-    class _Fake:
-        @staticmethod
-        def from_single_file(src, **kw):
-            seen["src"] = src
-            return "MODEL"
-
-    old_cls = diffusers.Flux2Transformer2DModel
-    old_t = cz_pipeline.ZIMAGE_TRANSFORMER
-    diffusers.Flux2Transformer2DModel = _Fake
-    cz_pipeline.ZIMAGE_TRANSFORMER = p
-    try:
-        assert cz_pipeline._load_transformer() == "MODEL"
-    finally:
-        diffusers.Flux2Transformer2DModel = old_cls
-        cz_pipeline.ZIMAGE_TRANSFORMER = old_t
-    assert isinstance(seen["src"], dict), "a path was passed instead of the state dict"
-    assert sorted(seen["src"]) == [_WD, "x_embedder.weight"], sorted(seen["src"])
-
-
 def test_convert_device_cpu_is_respected():
     """convert_device=cpu = never touch the GPU (a conversion during a render)."""
     w = torch.randn(4, 4).to(torch.float8_e4m3fn)
@@ -245,11 +215,21 @@ _QWEN_SIG = ("x_embedder.weight", "context_embedder.weight",
              "single_transformer_blocks.0.attn.to_q.weight")
 
 
+# A FLUX.3 Image Klein transformer, by its block names (what cz_flux3.family_from_keys
+# reads; the exact tensor list of the unsloth GGUF is not needed for the guard).
+_FLUX3_SIG = ("early_stream_modulations.0.lin.weight", "mode_blocks.0.img_attn.qkv.weight",
+              "x_embedders.0.weight")
+
+
 def test_gguf_arch_and_layout():
-    ok = _gguf("klein.gguf", "flux2", *_QWEN_SIG)
-    assert cz_pipeline._gguf_arch(ok) == "flux2"
-    assert cz_pipeline._gguf_layout(ok) == "flux2"
+    ok = _gguf("flux3.gguf", "flux3", *_FLUX3_SIG)
+    assert cz_pipeline._gguf_arch(ok) == "flux3"
+    assert cz_pipeline._gguf_layout(ok) == "flux3"
     assert cz_pipeline._gguf_layout_unsupported(ok) is None
+    # a FLUX.2 Klein GGUF: a known layout, but the other family -> refused, named
+    k2 = _gguf("klein.gguf", "flux2", *_QWEN_SIG)
+    assert cz_pipeline._gguf_layout(k2) == "flux2"
+    assert "crispz-klein" in (cz_pipeline._gguf_layout_unsupported(k2) or "")
     # FLUX.1 au layout city96: noms de tenseurs completement differents -> foreign
     f1 = _gguf("flux1.gguf", "flux", "double_blocks.0.img_attn.qkv.weight")
     assert cz_pipeline._gguf_arch(f1) == "flux"
@@ -262,9 +242,9 @@ def test_gguf_layout_beats_a_mislabelled_architecture():
     """Conversion tools stamp 'general.architecture' any old way: Qwen-Image files have
     been published declared as 'wan'. The TENSOR NAMES are proof, the KV label is not ->
     the layout wins, otherwise a perfectly loadable model gets thrown out."""
-    p = _gguf("mislabelled.gguf", "wan", *_QWEN_SIG)
+    p = _gguf("mislabelled.gguf", "wan", *_FLUX3_SIG)
     assert cz_pipeline._gguf_arch(p) == "wan"
-    assert cz_pipeline._gguf_layout(p) == "flux2"
+    assert cz_pipeline._gguf_layout(p) == "flux3"
     assert cz_pipeline._gguf_layout_unsupported(p) is None
 
 
@@ -282,22 +262,23 @@ def test_gguf_qwen_diffusers_layout_is_not_mistaken_for_flux2():
     the FLUX.2 signature (x_embedder + context_embedder + double_stream_modulation) ->
     the layout is undetermined, the declared architecture decides, and the file is
     dropped."""
-    p = _gguf("qwenlike.gguf", "qwen_image", "transformer_blocks.0.attn.to_q.weight",
-              "img_in.weight", "txt_in.weight", "norm_out.linear.weight")
+    # (no transformer_blocks tensor here: in crispz-flux3 that name alone reads as a
+    # FLUX.2 double-stream block and the file is refused by family, see _gguf_layout)
+    p = _gguf("qwenlike.gguf", "qwen_image", "img_in.weight", "txt_in.weight",
+              "norm_out.linear.weight")
     assert cz_pipeline._gguf_layout(p) == "unknown"
     assert cz_pipeline._gguf_layout_unsupported(p) is None      # not 'foreign'
     assert cz_pipeline._gguf_arch(p) == "qwen_image"            # -> dropped on its architecture
 
 
 def test_list_checkpoints_accepts_the_mislabelled_gguf():
-    """End to end: the dropdown must offer the mislabelled FLUX.2 GGUF and refuse the
+    """End to end: the dropdown must offer the mislabelled FLUX.3 GGUF and refuse the
     Qwen-Image one, in a checkpoints folder of its own."""
     import tempfile
     d = tempfile.mkdtemp(prefix="cz_ckpt_")
-    for src, dst in ((_gguf("ck_ok.gguf", "wan", *_QWEN_SIG), "hyphoria_like.gguf"),
+    for src, dst in ((_gguf("ck_ok.gguf", "wan", *_FLUX3_SIG), "hyphoria_like.gguf"),
                      (_gguf("ck_qwen.gguf", "qwen_image",
-                            "transformer_blocks.0.attn.to_q.weight",
-                            "img_in.weight"), "qwen_like.gguf"),
+                            "img_in.weight", "txt_in.weight"), "qwen_like.gguf"),
                      (_gguf("ck_sd.gguf", "flux2", "blocks.0.attn.wq.weight"),
                       "sdcpp_like.gguf")):
         import shutil

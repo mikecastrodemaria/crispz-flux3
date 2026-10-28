@@ -25,11 +25,14 @@ from safetensors.torch import save_file  # noqa: E402
 import cz_pipeline as P  # noqa: E402
 
 
-def _ckpt(path, dim=3072, dtype=torch.bfloat16):
+def _ckpt(path, dim=3072, dtype=torch.bfloat16, family="flux3"):
     """A transformer the header alone can identify: the modulation layer's shape is the
-    signature klein reads (out = 6 x hidden)."""
-    save_file({"double_stream_modulation_img.linear.weight":
-               torch.zeros(dim * 6, dim, dtype=dtype)}, path)
+    signature klein read (out = 6 x hidden); crispz-flux3 reads the FAMILY off the block
+    names instead, so the fixture carries FLUX.3 names by default and FLUX.2 ones on
+    request."""
+    key = ("early_stream_modulations.0.lin.weight" if family == "flux3"
+           else "double_stream_modulation_img.linear.weight")
+    save_file({key: torch.zeros(dim * 6, dim, dtype=dtype)}, path)
     return path
 
 
@@ -66,20 +69,22 @@ def test_a_checkpoint_label_carries_variant_size_and_format():
     with _Lib() as lib:
         p = _ckpt(os.path.join(lib.ck, "model.safetensors"), dim=3072)
         info = P.model_info(p)
-        assert info["variant"] == "4B", info
+        assert info["variant"] == "FLUX.3", info
         assert info["format"] == "bf16", info
         assert info["size_h"].endswith("MB"), info
-        label = P.model_label("4b/model.safetensors", p)
-        for bit in ("4b/model.safetensors", "4B", "bf16", info["size_h"]):
+        label = P.model_label("f3/model.safetensors", p)
+        for bit in ("f3/model.safetensors", "FLUX.3", "bf16", info["size_h"]):
             assert bit in label, (bit, label)
 
 
 def test_a_lora_label_carries_the_variant_that_decides_if_it_loads():
     with _Lib() as lib:
-        p = _lora(os.path.join(lib.lo, "style.safetensors"), dim=4096)
+        # transformer_blocks keys = a FLUX.2 Klein LoRA: the label says so, which is what
+        # decides whether it loads here (it does not)
+        p = _lora(os.path.join(lib.lo, "style.safetensors"), dim=3072)
         info = P.model_info(p, "lora")
-        assert info["variant"] == "9B", info
-        assert "9B" in P.model_label("style.safetensors", p, "lora")
+        assert info["variant"] == "FLUX.2", info
+        assert "FLUX.2" in P.model_label("style.safetensors", p, "lora")
 
 
 def test_the_value_behind_an_entry_is_still_the_plain_name():
@@ -115,12 +120,12 @@ def test_a_file_that_changes_is_read_again():
     """The cache is stamped on size and mtime: a re-downloaded model must not keep the
     label of the one it replaced."""
     with _Lib() as lib:
-        p = _ckpt(os.path.join(lib.ck, "a.safetensors"), dim=3072)
-        assert P.model_info(p)["variant"] == "4B"
+        p = _ckpt(os.path.join(lib.ck, "a.safetensors"))
+        assert P.model_info(p)["variant"] == "FLUX.3"
         os.remove(p)
-        _ckpt(p, dim=4096)
+        _ckpt(p, family="flux2")
         os.utime(p, (0, 0))                    # a different stamp, whatever the clock did
-        assert P.model_info(p)["variant"] == "9B"
+        assert P.model_info(p)["variant"] == "FLUX.2"
 
 
 def test_an_unreadable_file_still_gets_a_line():

@@ -3901,7 +3901,18 @@ def _preset_ckpt_refusal(ckpt, data):
     # for -- its hidden dimension names it. So an old preset with no base_repo stays
     # actionable: we do not merely say that it is old.
     target = want or cz_pipeline._variant_repo(dim)
-    if target and target in ZIMAGE_BASE_REPOS and target != cz_pipeline.BASE_REPO:
+    fam = None
+    try:
+        fam = cz_pipeline._file_family(resolve_checkpoint(ckpt))
+    except Exception:
+        pass
+    if fam == "flux2":
+        # No base of THIS build loads it: the width (3072) would otherwise point at the
+        # FLUX.3 distilled repo, a wrong direction said with confidence.
+        action = ("**This preset names a FLUX.2 Klein checkpoint, which runs in "
+                  "crispz-klein, not here: pick a FLUX.3 checkpoint above, then hit "
+                  "_Update selected_ to repair the preset.**")
+    elif target and target in ZIMAGE_BASE_REPOS and target != cz_pipeline.BASE_REPO:
         action = (f"**Pick `{target}` in the _FLUX.3 checkpoint_ dropdown above, then "
                   f"load this preset again.**")
     else:

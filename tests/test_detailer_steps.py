@@ -33,11 +33,16 @@ def _with_model(base, transformer, fn):
 def test_follows_the_model_profile_by_default():
     def check():
         D.CONFIG.pop("detailer_steps", None)
-        assert D._detailer_steps(12) == 4, "klein est distille a 4 steps"
-    _with_model("black-forest-labs/FLUX.2-klein-4B", None, check)
+        assert D._detailer_steps(40) == 16, "FLUX.3 distilled runs 16 steps"
+    _with_model("black-forest-labs/flux-3-image-klein", None, check)
     # a single-file transformer decides the profile too
-    _with_model("black-forest-labs/FLUX.2-klein-9B",
-                r"F:\x\pGGUFAishaNSFWFlux2Klein_v1.gguf", check)
+    _with_model("black-forest-labs/flux-3-image-klein-base",
+                r"F:\x\flux3-image-klein-Q4_K_M.gguf", check)
+
+    def check_base():
+        D.CONFIG.pop("detailer_steps", None)
+        assert D._detailer_steps(60) == 50, "the base checkpoint wants 50"
+    _with_model("black-forest-labs/flux-3-image-klein-base", None, check_base)
     print("OK test_follows_the_model_profile_by_default")
 
 
@@ -47,7 +52,7 @@ def test_never_raises_the_slider():
         D.CONFIG.pop("detailer_steps", None)
         assert D._detailer_steps(3) == 3
         assert D._detailer_steps(1) == 1
-    _with_model("black-forest-labs/FLUX.2-klein-4B", None, check)
+    _with_model("black-forest-labs/flux-3-image-klein", None, check)
     print("OK test_never_raises_the_slider")
 
 
@@ -58,8 +63,8 @@ def test_config_overrides():
         D.CONFIG["detailer_steps"] = -1
         assert D._detailer_steps(12) == 12, "-1 hands control back to the slider"
         D.CONFIG["detailer_steps"] = "anything at all"
-        assert D._detailer_steps(12) == 4, "an unreadable value falls back on the profile"
-    _with_model("black-forest-labs/FLUX.2-klein-4B", None, check)
+        assert D._detailer_steps(40) == 16, "an unreadable value falls back on the profile"
+    _with_model("black-forest-labs/flux-3-image-klein", None, check)
     print("OK test_config_overrides")
 
 

@@ -71,31 +71,14 @@ class FakePipe:
         pass
 
 
-def _lora(path, hidden=4096, rank=4):
-    """A tiny LoRA in the PEFT dialect, at the 9B's hidden dimension."""
+def _lora(path, hidden=3072, rank=4):
+    """A tiny LoRA in the PEFT dialect, on FLUX.3 block names (the family guard reads
+    them; a transformer_blocks key would be a FLUX.2 file and be refused upstream)."""
     save_file({
-        "transformer.transformer_blocks.0.attn.to_q.lora_A.weight": torch.zeros(rank, hidden),
-        "transformer.transformer_blocks.0.attn.to_q.lora_B.weight": torch.zeros(hidden, rank),
+        "transformer.mode_blocks.0.attn.to_q.lora_A.weight": torch.zeros(rank, hidden),
+        "transformer.mode_blocks.0.attn.to_q.lora_B.weight": torch.zeros(hidden, rank),
     }, path)
     return path
-
-
-class _Base9B:
-    """Makes the variant guard believe the base runs as a 9B."""
-
-    def __enter__(self):
-        self.key = cz.BASE_REPO
-        self.had = self.key in cz._BASE_DIM_CACHE
-        self.old = cz._BASE_DIM_CACHE.get(self.key)
-        cz._BASE_DIM_CACHE[self.key] = 4096
-        return self
-
-    def __exit__(self, *exc):
-        if self.had:
-            cz._BASE_DIM_CACHE[self.key] = self.old
-        else:
-            cz._BASE_DIM_CACHE.pop(self.key, None)
-        return False
 
 
 def test_loras_are_loaded_with_real_tensors():
@@ -103,8 +86,7 @@ def test_loras_are_loaded_with_real_tensors():
     try:
         p = _lora(os.path.join(tmp, "dora.safetensors"))
         pipe = FakePipe()
-        with _Base9B():
-            ok, applied = cz._sync_adapters(pipe, [(p, 0.8)], [])
+        ok, applied = cz._sync_adapters(pipe, [(p, 0.8)], [])
         assert ok and applied == [(p, 0.8)], (ok, applied)
         assert len(pipe.loaded) == 1, pipe.loaded
         _a, kw = pipe.loaded[0]
@@ -123,8 +105,7 @@ def test_a_failed_load_puts_the_offload_back():
         cz.DEVICE = "cuda"
         cz._effective_offload = lambda *a, **k: "model"
         try:
-            with _Base9B():
-                ok, applied = cz._sync_adapters(pipe, [(p, 0.8)], [])
+            ok, applied = cz._sync_adapters(pipe, [(p, 0.8)], [])
         finally:
             cz.DEVICE, cz._effective_offload = real_dev, real_off
         assert (ok, applied) == (False, []), (ok, applied)

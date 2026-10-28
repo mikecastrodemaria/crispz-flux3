@@ -1,4 +1,8 @@
-"""The 4B and the 9B share the architecture AND the tensor names.
+"""crispz-klein told its 4B and 9B apart by width. crispz-flux3 cannot: FLUX.3 Image
+Klein is 3072 wide like the 4B, so the FAMILY is read from the tensor names instead, and
+the width helpers below only serve to NAME a FLUX.2 file in a message.
+
+crispz-klein's original note: the 4B and the 9B share the architecture AND the tensor names.
 
 So the architecture guard lets both through, and a 9B loaded in a 4B pipeline
 blew up after reading gigabytes, on an unreadable diffusers
@@ -60,44 +64,52 @@ def _with_base(repo, dim, fn):
         P._BASE_DIM_CACHE.update(old_cache)
 
 
-def test_mismatch_is_refused_both_ways():
-    p4 = _ckpt("m4.safetensors", 3072)
-    p9 = _ckpt("m9.safetensors", 4096)
-
-    # a 4B base: the 9B is refused, the 4B goes through
-    assert _with_base("base-4b", 3072, lambda: P._safetensors_unsupported(p4)) is None
-    msg = _with_base("base-4b", 3072, lambda: P._safetensors_unsupported(p9))
-    assert msg and "9B" in msg and "4B" in msg, msg
-    # the per-file reason stays SHORT: it is repeated as many times as there are
-    # files discarded. The instructions go into the summary, once.
-    assert len(msg) < 90, f"raison trop longue ({len(msg)} car.): {msg}"
-    assert "NON-COMMERCIAL" not in msg
-
-    # a 9B base: the symmetry must hold
-    assert _with_base("base-9b", 4096, lambda: P._safetensors_unsupported(p9)) is None
-    msg = _with_base("base-9b", 4096, lambda: P._safetensors_unsupported(p4))
-    assert msg and "4B" in msg, msg
-    print("OK test_mismatch_is_refused_both_ways")
+def _ckpt3(name):
+    """A fake FLUX.3 transformer: the block NAMES are what the family guard reads."""
+    p = os.path.join(TMP, name)
+    save_file({"early_stream_modulations.0.lin.weight": torch.zeros(2, 2),
+               "mode_blocks.0.img_attn.qkv.weight": torch.zeros(2, 2)}, p)
+    return p
 
 
-def test_summary_carries_the_instructions_once():
-    """The summary carries the key to change AND the 9B's licence - once."""
-    line = _with_base("base-4b", 3072, lambda: P._variant_skip_summary(11, 4096))
+def test_a_flux2_file_is_refused_and_a_flux3_one_passes_whatever_the_base():
+    """crispz-flux3's reading of the same trap: FLUX.3 is as wide as FLUX.2-klein-4B, so
+    the width decides nothing any more. The FAMILY does, from the tensor names, and it
+    does not depend on which base repo is loaded."""
+    p2 = _ckpt("m4.safetensors", 3072)          # FLUX.2 names, FLUX.3's width
+    p3 = _ckpt3("m3.safetensors")
+    for base, dim in (("base-flux3", 3072), ("mystere", None)):
+        assert _with_base(base, dim, lambda: P._safetensors_unsupported(p3)) is None
+        msg = _with_base(base, dim, lambda: P._safetensors_unsupported(p2))
+        assert msg and "FLUX.2" in msg and "crispz-klein" in msg, msg
+        # the per-file reason stays SHORT: it is repeated as many times as there are
+        # files discarded.
+        assert len(msg) < 130, f"reason too long ({len(msg)} chars): {msg}"
+        assert "NON-COMMERCIAL" not in msg
+    print("OK test_a_flux2_file_is_refused_and_a_flux3_one_passes_whatever_the_base")
+
+
+def test_summary_names_the_studio_that_runs_the_file_once():
+    """The summary of the discarded files says where they DO run, once, and never
+    pretends a setting of this build could load them."""
+    line = _with_base("base-flux3", 3072, lambda: P._variant_skip_summary(11, 4096))
     assert "11 checkpoint" in line, line
-    assert "FLUX.2-klein-9B" in line and "FLUX.2-klein-4B" in line, line
-    assert P.CFG_MODEL_KEY in line, f"the config key must be named: {line}"
+    assert "FLUX.2-klein-9B" in line and "FLUX.3 Image Klein" in line, line
+    assert "crispz-klein" in line, line
     assert "zimage_model" not in line, "the old name must no longer appear"
-    assert "NON-COMMERCIAL" in line, line
-    # the other way round: no licence note when discarding a 4B
-    line = _with_base("base-9b", 4096, lambda: P._variant_skip_summary(2, 3072))
-    assert "NON-COMMERCIAL" not in line, line
-    print("OK test_summary_carries_the_instructions_once")
+    assert "NON-COMMERCIAL" not in line and "switch the base" not in line, line
+    print("OK test_summary_names_the_studio_that_runs_the_file_once")
 
 
 def test_unknown_base_never_discards():
-    """A house rule: we NEVER discard a model on a doubt."""
-    p9 = _ckpt("u9.safetensors", 4096)
-    assert _with_base("mystere", None, lambda: P._safetensors_unsupported(p9)) is None
+    """A house rule: we NEVER discard a model on a doubt. A file with no family marker
+    at all (another layout) passes the family guard, whatever the base; a POSITIVE
+    FLUX.2 reading is not a doubt."""
+    p = os.path.join(TMP, "nofamily.safetensors")
+    save_file({"x_embedder.weight": torch.zeros(2, 2)}, p)
+    assert _with_base("mystere", None, lambda: P._safetensors_unsupported(p)) is None
+    assert _with_base("mystere", None,
+                      lambda: P._safetensors_unsupported(_ckpt("u9.safetensors", 4096)))
     print("OK test_unknown_base_never_discards")
 
 
@@ -169,21 +181,19 @@ def test_a_lora_declares_its_variant_through_its_shapes():
     print("OK test_a_lora_declares_its_variant_through_its_shapes")
 
 
-def test_a_4B_lora_on_a_9B_base_is_refused_in_one_sentence():
-    old = P.BASE_REPO
-    P.BASE_REPO = "test-only/FLUX.2-klein-9B"
-    P._BASE_DIM_CACHE[P.BASE_REPO] = 4096
-    try:
-        why = P._lora_unsupported(_lora("lora_4B_on_9B.safetensors", 3072))
-        assert why, "a 4B LoRA must be refused on a 9B base"
-        assert "4B" in why and "9B" in why, why
-        assert "3072" in why and "4096" in why, why      # both numbers, named
-        assert "switch the base model" in why, why       # and what to do
-        # the control: the right variant goes through
-        assert P._lora_unsupported(_lora("lora_9B_on_9B.safetensors", 4096)) is None
-    finally:
-        P.BASE_REPO = old
-    print("OK test_a_4B_lora_on_a_9B_base_is_refused_in_one_sentence")
+def test_a_flux2_lora_is_refused_in_one_sentence():
+    """The same intention as klein's 4B-on-9B refusal: peft would otherwise dump forty
+    lines of key mismatches. Here the other family IS the wrong model, and a FLUX.3 LoRA
+    (block names mode_blocks / early_stream_modulations) goes through."""
+    why = P._lora_unsupported(_lora("lora_flux2.safetensors", 3072, layout="flux-original"))
+    assert why, "a FLUX.2 Klein LoRA must be refused on FLUX.3"
+    assert "FLUX.2" in why and "FLUX.3" in why and "crispz-klein" in why, why
+    assert "\n" not in why.strip(), "one sentence"
+    p = os.path.join(TMP, "lora_flux3.safetensors")
+    save_file({"transformer.mode_blocks.0.attn.to_q.lora_A.weight": torch.zeros(8, 3072),
+               "transformer.mode_blocks.0.attn.to_q.lora_B.weight": torch.zeros(3072, 8)}, p)
+    assert P._lora_unsupported(p) is None
+    print("OK test_a_flux2_lora_is_refused_in_one_sentence")
 
 
 def test_a_lora_without_a_signature_is_never_filtered():
@@ -236,12 +246,13 @@ def test_derived_widths_do_not_fool_the_detector():
 
 
 if __name__ == "__main__":
-    for fn in (test_hidden_dim_read_from_header, test_mismatch_is_refused_both_ways,
-               test_summary_carries_the_instructions_once,
+    for fn in (test_hidden_dim_read_from_header,
+               test_a_flux2_file_is_refused_and_a_flux3_one_passes_whatever_the_base,
+               test_summary_names_the_studio_that_runs_the_file_once,
                test_unknown_base_never_discards, test_bogus_shape_is_not_taken_for_a_hidden_dim,
                test_file_without_signature_is_not_filtered,
                test_a_lora_declares_its_variant_through_its_shapes,
-               test_a_4B_lora_on_a_9B_base_is_refused_in_one_sentence,
+               test_a_flux2_lora_is_refused_in_one_sentence,
                test_a_lora_without_a_signature_is_never_filtered,
                test_a_lokr_has_no_lora_signature,
                test_every_lora_dialect_is_recognised,

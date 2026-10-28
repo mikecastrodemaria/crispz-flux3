@@ -102,7 +102,22 @@ FLUX.2-klein-4B : l'ancien tri 4B/9B laisserait passer un fichier FLUX.2.
 Piège diffusers : `ModularPipeline.blocks` renvoie une **copie** ; les vrais blocs sont
 dans `mp._blocks` (c'est là qu'on rattache `hook.owner`).
 
-## 5. État au 28/10/2026 (branche `wip/flux3-engine`, lots A à D livrés)
+## 5. État au 28/10/2026 (branche `wip/flux3-engine`, lots A à E livrés, e2e GPU en attente)
+
+Fait au lot E : les 47 tests FLUX.2 sont réécrits avec la même intention sur FLUX.3 (garde
+par famille, libellés FLUX.3 / FLUX.2, profils 16 / 50, catalogue d'edit LoRAs vide mais
+déclarable en config) ou retirés avec leur ligne dans le CHANGELOG
+(`test_precache_variants.py`, `test_prefixed_single_file_is_loaded_as_a_state_dict`).
+`_gguf_layout` reconnaît un GGUF FLUX.3 ; `_preset_ckpt_refusal` nomme crispz-klein pour un
+fichier FLUX.2 au lieu de proposer un repo. `tests/test_flux3_e2e.py` (GPU, 6 étapes :
+chargement, gen, edit 1 ref, edit 2 refs, inpaint, refine, plus le Stop) se saute sans
+CUDA ou sans accès au repo. Suite CPU : **533 passent, 0 échec, 1 skip (le e2e)**.
+
+**Le e2e GPU n'a pas encore tourné** : la session HF de cette machine (compte KimHose) lit
+les métadonnées des repos FLUX.3 mais le téléchargement répond GatedRepoError. Mike doit
+accepter la licence sur https://huggingface.co/black-forest-labs/flux-3-image-klein (et
+-base) avec ce compte ; ensuite `.venv-lock/Scripts/python tests/test_flux3_e2e.py`
+(environ 20 Go, bf16 seul : les variantes fp8r / nvfp4 sont des téléchargements à part).
 
 Fait au lot D : `requirements.txt` sur `diffusers==0.42.1` (PyPI), `transformers>=5,<6`,
 `huggingface-hub>=1.32` ; `requirements-lock.txt` régénéré depuis un venv vierge Python
@@ -279,7 +294,7 @@ Acceptation : `tools/smoke_test.py` vert (22 checks, `build_ui()` compris) ;
 
 Acceptation : installation propre dans un venv vierge ; `python -c "import app"` OK.
 
-### Lot E : tests
+### Lot E : tests (FAIT le 28/10/2026 sur CPU ; le e2e GPU attend la licence)
 
 1. Les 24 tests FLUX.2 listés au §5 : pour chacun, soit le réécrire pour FLUX.3 (même
    intention, ex. "un LoRA de l'autre famille est refusé en une phrase"), soit le
