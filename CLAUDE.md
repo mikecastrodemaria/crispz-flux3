@@ -109,7 +109,8 @@ versionné : capture de l'onglet Text to Image prise dans l'UI sur la 5090, rend
 inpaint du e2e), README_CLI et drapeaux CLI `--flux3-model` / `--flux3-transformer` (les
 anciens restent des alias), cache dequant retiré (`tools/rebuild_dequant_cache.py`,
 `rebuild_cache.bat`, clés `dequant_cache*`), `APP_VERSION` 0.1.0, CHANGELOG 0.1.0, FORK.md
-(mesures et feuille de route). Reste : le launcher Pinokio (Mike crée le repo vide).
+(mesures et feuille de route). Launcher Pinokio livré : mikecastrodemaria/crispz-flux3.pinokio
+(venv Python 3.11, torch 2.11 cu128, garde sur les blocs modulaires FLUX.3).
 
 Fait au lot E : les 47 tests FLUX.2 sont réécrits avec la même intention sur FLUX.3 (garde
 par famille, libellés FLUX.3 / FLUX.2, profils 16 / 50, catalogue d'edit LoRAs vide mais
@@ -318,7 +319,7 @@ Acceptation : installation propre dans un venv vierge ; `python -c "import app"`
 
 Acceptation : suite complète verte sur CPU, 0 échec, 0 test ignoré sans raison écrite.
 
-### Lot F : documentation et livraison (FAIT le 28/10/2026, sauf le launcher Pinokio)
+### Lot F : documentation et livraison (FAIT le 28/10/2026, launcher Pinokio compris)
 
 Demande de Mike (28/10) : dès qu'une version est testable et utilisable, faire un vrai
 rendu d'image (sur la 5090, le e2e) pour remettre des captures dans le README, et
