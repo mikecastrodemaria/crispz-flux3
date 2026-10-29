@@ -96,3 +96,5 @@ cache/
 # Local wildcard backups (dated), never versioned
 wildcards/_backup-*/
 bench/
+# Announcement drafts (posts), local only
+PINOKIO_POST.md
