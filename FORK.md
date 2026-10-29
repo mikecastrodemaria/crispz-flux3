@@ -83,6 +83,16 @@ refusés dès le menu, aucun chargeur ne les reconstruit ; le GGUF Q4_K_M charge
 GGUFQuantizationConfig une fois le dtype de calcul épinglé (diffusers annonce uint8 comme
 dtype d'un modèle GGUF et les blocs modulaires castaient les latents dessus).
 
+**Outpaint LoRA** (CivitAI 3003865, le premier LoRA d'édition FLUX.3, 29/10) : vérifié sur
+la 5090 par la CLI (`--expand right --expand-lora`, 1024 vers 1344x1024) : bf16 16 steps, et
+GGUF Q4_K_M en offload model 30,9 s ; la bande continue la pluie et le sol sans couture ni
+gris résiduel (`assets/sample-outpaint.jpg`). Le premier essai de Mike dans l'app échouait
+en offload model : le chargeur LoRA de diffusers retire les hooks accelerate puis appelle
+`enable_model_cpu_offload()` sur le pipeline modulaire, qui ne l'a pas (AttributeError, le
+pipe laissé sur CPU). `Flux3Pipe.load_lora_weights` retire les hooks avant et les remet
+après. Mesure annexe : un premier pas à 5 min 27 quand l'app de Mike rendait en même temps
+(carte à 100 %), 1,3 s par pas ensuite ; la même commande seule, 6,2 s en tout à 4 steps.
+
 Bench `tools/bench_models.py` du 28/10 au soir (5090, bf16, offload none sauf GGUF,
 1024x1024, seed 12345, 3 images par modèle ; "stable" = moyenne des deux dernières) :
 

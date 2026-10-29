@@ -483,6 +483,33 @@ class Flux3Pipe:
             except Exception:
                 pass
 
+    # -- LoRA (the hooks step aside for diffusers' loader) --
+    def load_lora_weights(self, *args, **kwargs):
+        """Flux3LoraLoaderMixin.load_lora_weights, with the offload hooks removed FIRST
+        and put back AFTER.
+
+        diffusers' loader runs with `self` = the modular pipeline: it finds accelerate's
+        CpuOffload hooks on the transformer and the VAE (ours, from
+        enable_model_cpu_offload), removes them, loads the adapter, then calls
+        `_pipeline.enable_model_cpu_offload()` to put them back, and a ModularPipeline has
+        no such method: AttributeError, the LoRA refused, the pipe left on the CPU. Mike's
+        first Outpaint-LoRA run in the app failed exactly there (2026-10-29, offload
+        'model', which a GGUF transformer forces). With no hook in sight the loader has
+        nothing to disable and nothing to re-enable; the offload is restored here, in the
+        same mode and on the same device."""
+        had_model = bool(self._all_hooks)
+        had_seq = bool(self._seq_offload)
+        dev = self._offload_device
+        if had_model or had_seq:
+            self.remove_all_hooks()
+        try:
+            return self._mp.load_lora_weights(*args, **kwargs)
+        finally:
+            if had_model:
+                self.enable_model_cpu_offload(device=dev)
+            elif had_seq:
+                self.enable_sequential_cpu_offload(device=dev)
+
     def set_progress_bar_config(self, **kwargs):
         try:
             self._mp.set_progress_bar_config(**kwargs)

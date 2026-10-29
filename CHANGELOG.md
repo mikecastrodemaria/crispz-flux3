@@ -6,6 +6,12 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
 
 ## Unreleased
 
+- LoRAs load under offload `model` / `sequential` (a GGUF transformer forces `model`):
+  diffusers' loader removed the accelerate hooks and then called
+  `enable_model_cpu_offload()` on the modular pipeline, which has none (AttributeError,
+  "edit LoRA could not be applied", the pipe left on the CPU). `Flux3Pipe.load_lora_weights`
+  lifts the hooks itself and restores the offload afterwards. Found by the first Outpaint
+  LoRA run in the app (2026-10-29); verified on the 5090 in bf16 and GGUF.
 - **Outpaint LoRA**: the CivitAI "FLUX 3 Image Klein Outpaint LoRA" (models/3003865,
   2026-10-28, the first edit-task LoRA for FLUX.3) ships as the `Outpaint` edit preset
   (downloaded from CivitAI on first use, SHA256 checked, weight 1.5 as the author

@@ -230,6 +230,35 @@ def test_the_base_variant_runs_a_real_cfg_with_a_negative():
     assert pipe._mp.guider.guidance_scale == pytest.approx(1.0)   # per call, never sticky
 
 
+def test_load_lora_weights_lifts_the_offload_hooks_and_puts_them_back(monkeypatch):
+    """diffusers' LoRA loader re-enables the offload through `_pipeline.enable_model_cpu_
+    offload()`, which the modular pipeline lacks (the app's first Outpaint-LoRA run,
+    2026-10-29): the adapter removes its hooks before the call and restores them after."""
+    pipe = tiny_pipe()
+    pipe.enable_model_cpu_offload(device="cpu")
+    seen = {}
+
+    def fake_load(*a, **kw):
+        seen["hooks_during"] = list(pipe._all_hooks)
+        seen["args"] = (a, kw)
+    monkeypatch.setattr(pipe._mp, "load_lora_weights", fake_load, raising=False)
+    pipe.load_lora_weights("some/dir", weight_name="x.safetensors", adapter_name="cz_lora_0")
+    assert seen["hooks_during"] == []                       # nothing for diffusers to touch
+    assert seen["args"][1]["adapter_name"] == "cz_lora_0"
+    assert pipe._all_hooks and pipe._execution_device.type == "cpu"   # offload back in place
+    # a failure inside the loader still restores the offload (no pipe left on the CPU)
+    monkeypatch.setattr(pipe._mp, "load_lora_weights",
+                        lambda *a, **k: (_ for _ in ()).throw(ValueError("bad lora")), raising=False)
+    with pytest.raises(ValueError):
+        pipe.load_lora_weights("some/dir", weight_name="y.safetensors")
+    assert pipe._all_hooks
+    # without offload: a plain pass-through
+    pipe.remove_all_hooks()
+    monkeypatch.setattr(pipe._mp, "load_lora_weights", fake_load, raising=False)
+    pipe.load_lora_weights("some/dir", weight_name="z.safetensors")
+    assert pipe._all_hooks == []
+
+
 def test_cpu_offload_names_exist_and_the_hooks_free_cleanly():
     pipe = tiny_pipe()
     pipe.enable_model_cpu_offload(device="cpu")        # accelerate hooks, CPU to CPU here

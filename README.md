@@ -22,6 +22,11 @@ take about **7 s**.*
 | ![generate](assets/sample-gen.jpg) | ![edit](assets/sample-edit.jpg) | ![inpaint](assets/sample-inpaint.jpg) |
 | `gen`: *"a comic book panel, a woman with red hair running in the rain at night, ink lines, flat colors, dramatic angle"*, 16 steps, 7.1 s | `edit`: *"make it daytime, sunny, blue sky"*, 13.5 s | `inpaint`: *"a large bright full moon behind heavy clouds in the top right corner"* painted into the masked corner, 5.7 s |
 
+| Outpaint (LoRA): the 1024x1024 render above, extended 30% to the right |
+|---|
+| ![outpaint](assets/sample-outpaint.jpg) |
+| `--expand right --expand-lora`: the Outpaint LoRA at 1.5 continues the rain and the ground on a gray band, no seam, no gray left; 16 steps, the original pixels pasted back. |
+
 The character stays the same across the three images: the edit and the inpaint run in
 the **same pipeline** as the generation, with no second model loaded. All three come from
 `tests/test_flux3_e2e.py` on an RTX 5090, which you can re-run yourself.
