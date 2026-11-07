@@ -92,7 +92,30 @@ def test_the_ui_presets_mirror_the_sample_and_the_edit_catalogue_is_flux3_only()
     # cz_ui's built-in PERFORMANCE is the fallback when config has none: the same table
     import cz_ui
     sample = {k: (int(v[0]), float(v[1])) for k, v in cfg["performance_presets"].items()}
+    assert cz_ui._BUILT_IN_PERFORMANCE == sample
     assert set(sample) >= set(cz_ui.PERFORMANCE) or cz_ui.PERFORMANCE == sample
+
+
+def test_a_config_preset_list_keeps_the_apps_newer_presets():
+    """A config.txt that copied performance_presets from an older sample used to hide
+    every preset added since (seen on crispz-moss, 2026-11-07). Now: the config's
+    entries first, the app's missing ones appended, said; performance_presets_merge:
+    false keeps the config's list alone; an unreadable list falls back to the app's."""
+    import cz_ui
+    old = {"performance_presets": {"Distilled (16 steps)": [16, 1.0], "Mine (12 steps)": [12, 1.0]}}
+    perf, lora, note = cz_ui._performance_from_config(old)
+    assert list(perf) == ["Distilled (16 steps)", "Mine (12 steps)", "Fast (8 steps)",
+                          "Base (50 steps, CFG 3.5)"]
+    assert perf["Base (50 steps, CFG 3.5)"] == (50, 3.5) and lora == {}
+    assert "'Fast (8 steps)'" in note and "performance_presets_merge" in note
+    perf, lora, note = cz_ui._performance_from_config(dict(old, performance_presets_merge=False))
+    assert list(perf) == ["Distilled (16 steps)", "Mine (12 steps)"] and note is None
+    perf, lora, note = cz_ui._performance_from_config({"performance_presets": {"X": ["a"]}})
+    assert perf == cz_ui._BUILT_IN_PERFORMANCE and "unreadable" in note
+    perf, lora, note = cz_ui._performance_from_config({})
+    assert perf == cz_ui._BUILT_IN_PERFORMANCE and note is None
+    perf, _l, _n = cz_ui._performance_from_config({"performance_presets": {"Distilled (16 steps)": [12, 1.0]}})
+    assert perf["Distilled (16 steps)"] == (12, 1.0)              # the config wins on a name
 
 
 def test_set_precision_changes_the_cache_key_and_is_said(monkeypatch):

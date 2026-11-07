@@ -48,6 +48,8 @@
     "caption_model": "blip-large",
     "_caption_model_help": "Auto-describe model: blip-large (default, local) | blip-base | ollama:<vision model> (listed in Prompt AI once Ollama is detected; blip-large takes over if Ollama fails)",
     "_performance_presets_help": "name -> [steps, guidance] or [steps, guidance, lora_file]. FLUX.3 Image Klein (distilled) is a 16-step flow map with NO CFG: guidance is ignored there, the presets keep it at 1.0. Fast (8 steps) is a draft mode, to be measured. The -base checkpoint is undistilled: 50 steps and a real CFG of 3.5 (BFL's model card), where the negative prompt works too.",
+    "_performance_presets_merge_help": "true (default): the app's own presets missing from your performance_presets are added after yours, so a config.txt copied from an older sample keeps showing the presets added since (said in the log). false: your list is the whole list.",
+    "performance_presets_merge": true,
     "performance_presets": {
         "Distilled (16 steps)": [
             16,

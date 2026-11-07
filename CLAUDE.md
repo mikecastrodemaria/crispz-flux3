@@ -361,6 +361,17 @@ L'historique reste dans FORK-klein.md.
 5. Ensuite seulement : launcher Pinokio `crispz-flux3.pinokio` (Mike crée le repo vide,
    on part de `crispz-klein.pinokio`).
 
+### Presets et config.txt (07/11/2026, porté depuis crispz-moss, sur `main` à la demande de Mike)
+
+Un `config.txt` qui a copié `performance_presets` remplaçait la liste entière de l'app :
+sur crispz-moss, les presets ajoutés après la copie n'apparaissaient jamais. Le même bloc
+vivait ici. `cz_ui._performance_from_config` : les entrées de la config en tête (elles
+gagnent sur un nom), les presets de l'app qu'elle ne nomme pas ajoutés à la suite avec
+leur LoRA, dit dans le log au démarrage ; `performance_presets_merge: false` garde la
+liste de la config seule ; liste illisible = celle de l'app, dit. Test
+`test_a_config_preset_list_keeps_the_apps_newer_presets` (`test_flux3_profiles`), le
+test miroir rendu strict (liste intégrée = sample, déjà vrai ici). CHANGELOG « Unreleased ».
+
 ## 7. Validation GPU (Mike, RTX 5090)
 
 À mesurer et reporter dans FORK.md : temps de chargement, VRAM au repos et en pic,

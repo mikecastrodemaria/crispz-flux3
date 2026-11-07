@@ -6,6 +6,12 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
 
 ## Unreleased
 
+- **Performance presets and config.txt** (2026-11-07, ported from crispz-moss): a
+  `performance_presets` list copied into config.txt used to replace the app's list
+  entirely, hiding every preset added since. Now the config's entries come first (they
+  win on a name) and the app's missing presets are appended, said in the log at start;
+  `performance_presets_merge: false` keeps the config's list alone.
+
 - `switch_model` (protocol v1): on the remote route the gen op ignores `spec.model` so a script never swaps the model of the user's running instance. A caller that asks explicitly (`"switch_model": true` next to `"model"`, crispz-dataset-studio scoring a LoRA on its checkpoint) now gets the switch, said in the result's warnings and in the log; the model stays loaded after the call. Without the flag nothing changes (the warning names the flag). `cli_caps` announces `supports.switch_model`, the same field as crispz-klein. Tests in `tests/test_protocol.py`.
 - LoRAs load under offload `model` / `sequential` (a GGUF transformer forces `model`):
   diffusers' loader removed the accelerate hooks and then called
