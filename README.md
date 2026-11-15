@@ -303,7 +303,9 @@ profile is skipped for FLUX.3 names with a log line.
 - **Without Ollama** Improve does nothing and says why (Ollama stopped, no model, empty
   answer from a reasoning model); the text is left untouched.
 - **Config** (`config.txt`): the `ollama_improve` block: `enabled`, `endpoint` (empty =
-  the Ollama URL), `model`, `timeout`, `temperature`, `keep_alive` (0 = unload right
+  the Ollama URL), `model`, `timeout`, `temperature`, `top_p` / `top_k` /
+  `presence_penalty` (null = the model's own; Qwen3.8-27B non-thinking: 0.7 / 0.8 / 20 /
+  1.5), `keep_alive` (0 = unload right
   after the answer, the GPU is shared with generation), `positive_instruction`,
   `negative_instruction`, `default_negative`, `format`. A custom `ollama_improve_prompt`
   is still honored. The Ollama transport uses `127.0.0.1` (a `localhost` URL is

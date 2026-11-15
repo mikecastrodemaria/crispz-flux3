@@ -6,6 +6,12 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
 
 ## Unreleased
 
+- **Improve: optional sampling settings** `ollama_improve.top_p`, `top_k` and
+  `presence_penalty` (shared `prompt_improve` module), sent only when set: an existing
+  config.txt changes nothing. Meant for Qwen3.8-27B (Unsloth UD-Q2_K_XL through Ollama,
+  about 10 GB, fits beside FLUX.3 on the 5090), whose non-thinking profile is 0.7 / 0.8 /
+  20 / 1.5. A value that does not parse is skipped and said on stderr. Port the module
+  to the other crispz forks to keep the copies identical.
 - **Extra folder lists on Linux** (2026-11-07, whole family): `loras_extra_dirs` and the
   other 'a;b' folder lists were split on os.pathsep blindly, so on Linux (the CI) a
   Windows path in a shared preferences.json broke on its drive colon ('X:/a;Y:/b' into

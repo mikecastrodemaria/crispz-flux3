@@ -14,8 +14,8 @@
     "ollama_vision_blocklist": [],
     "ollama_keep_alive": 0,
     "ollama_cpu": false,
-    "ollama_improve": {"enabled": true, "endpoint": "", "model": "", "timeout": 120, "temperature": 0.7, "keep_alive": 0, "positive_instruction": "", "negative_instruction": "", "default_negative": "", "format": "auto"},
-    "_ollama_improve_help": "Improve prompt / Improve negative (Ollama, shared prompt_improve module). enabled=false hides the buttons. endpoint: '' = the Ollama URL above. model: '' = the model picked in Prompt AI, else the first installed. keep_alive 0 unloads the model right after the answer (the GPU is shared with image generation). positive_instruction / negative_instruction: '' = built-in (a custom ollama_improve_prompt is still honored). default_negative: what Improve negative starts from on an empty box ('' = built-in SDXL baseline). format: auto | tags | prose | off (input format stated to the model for the positive prompt).",
+    "ollama_improve": {"enabled": true, "endpoint": "", "model": "", "timeout": 120, "temperature": 0.7, "top_p": null, "top_k": null, "presence_penalty": null, "keep_alive": 0, "positive_instruction": "", "negative_instruction": "", "default_negative": "", "format": "auto"},
+    "_ollama_improve_help": "Improve prompt / Improve negative (Ollama, shared prompt_improve module). enabled=false hides the buttons. endpoint: '' = the Ollama URL above. model: '' = the model picked in Prompt AI, else the first installed. keep_alive 0 unloads the model right after the answer (the GPU is shared with image generation). positive_instruction / negative_instruction: '' = built-in (a custom ollama_improve_prompt is still honored). default_negative: what Improve negative starts from on an empty box ('' = built-in SDXL baseline). format: auto | tags | prose | off (input format stated to the model for the positive prompt). top_p / top_k / presence_penalty: null = the model's own value; for Qwen3.8-27B (non-thinking) use temperature 0.7, top_p 0.8, top_k 20, presence_penalty 1.5.",
     "job_queue": {
         "enabled": true
     },
