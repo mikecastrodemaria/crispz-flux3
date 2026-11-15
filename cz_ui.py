@@ -742,7 +742,39 @@ def _undistilled_profile():
 # The Generate sliders' bounds, the single source for the sliders and for the CivitAI
 # consensus guard: a sidecar written before the median ignored zeros (or a page whose
 # images all publish "steps": 0) must never push a value the slider refuses.
-GEN_STEPS_BOUNDS = (2, 40)
+#
+# The maximum was 40, crispz-klein's (a 4-step model). FLUX.3's BASE checkpoint wants 50
+# (BFL's model card, MODEL_PROFILES and the "Base (50 steps, CFG 3.5)" preset): selecting
+# it pushed 50 into a slider capped at 40 and Gradio refused every click after that
+# ("Value 50 is greater than maximum value 40", 2026-11-15, flux3-image-klein-base
+# single-file on the 5090). 100 leaves room above the base profile; a profile or preset
+# from config.txt asking for more raises the cap to its value, said in the log, rather
+# than breaking the UI.
+_GEN_STEPS_MAX = 100
+
+
+def _steps_cap(profiles, presets, floor=_GEN_STEPS_MAX):
+    """(the steps slider maximum, the names that raised it). The maximum covers every
+    model profile and every Performance preset, so selecting one can never push a value
+    the slider refuses."""
+    cap, raised = floor, []
+    items = [(f"model_profiles.{k}", (v or {}).get("steps")) for k, v in (profiles or {}).items()]
+    items += [(f"performance_presets.{k}", (v or (None,))[0]) for k, v in (presets or {}).items()]
+    for name, st in items:
+        try:
+            st = int(st)
+        except (TypeError, ValueError):
+            continue
+        if st > cap:
+            cap = st
+            raised.append(name)
+    return cap, raised
+
+
+_cap, _cap_raised = _steps_cap(MODEL_PROFILES, PERFORMANCE)
+if _cap_raised:
+    _log(f"steps slider maximum raised to {_cap} for {', '.join(_cap_raised)} (config.txt)")
+GEN_STEPS_BOUNDS = (2, _cap)
 GUIDANCE_BOUNDS = (0.0, 8.0)
 
 

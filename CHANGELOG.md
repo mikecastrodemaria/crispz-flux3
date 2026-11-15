@@ -6,6 +6,12 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
 
 ## Unreleased
 
+- **Steps slider capped at 40** (2026-11-15): crispz-klein's maximum (a 4-step model)
+  survived the port, while FLUX.3's BASE profile and the "Base (50 steps, CFG 3.5)" preset
+  ask for 50. Selecting the base checkpoint pushed 50 into the slider and Gradio refused
+  every click after that ("Value 50 is greater than maximum value 40"). The maximum is
+  now 100 and covers every model profile and preset; a config.txt one asking for more
+  raises it, said in the log (`tests/test_steps_bounds.py`).
 - **Extra folder lists on Linux** (2026-11-07, whole family): `loras_extra_dirs` and the
   other 'a;b' folder lists were split on os.pathsep blindly, so on Linux (the CI) a
   Windows path in a shared preferences.json broke on its drive colon ('X:/a;Y:/b' into
