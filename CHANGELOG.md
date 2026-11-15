@@ -6,6 +6,16 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
 
 ## Unreleased
 
+- **ComfyUI NVFP4 layers dequantized** (2026-11-15): a mixed build
+  (`flux3-image-klein-base-nvfp4-bdb`, 162 int8_tensorwise + 10 nvfp4 layers declared per
+  tensor) passed the menu, whose guard read only the central `_quantization_metadata`,
+  then the INT8/FP8 dequant read the packed nibbles as 8-bit integers and diffusers
+  crashed on a [3072, 1536] weight. The nvfp4 layers are now rebuilt in bf16 with
+  ComfyUI's layout (E2M1, even column in the HIGH nibble, FP8 block scales of 16 in
+  cuBLAS' blocked layout, per-tensor `weight_scale_2`; `nvfp4_scale_layout` for a
+  converter that does not swizzle), and the guards read the per-tensor `comfy_quant`
+  blobs too: an nvfp4 of another layout (ModelOpt) or an unknown format is refused in the
+  menu with its name. The log names a mixed build as such instead of "FP8 scaled".
 - **Steps slider capped at 40** (2026-11-15): crispz-klein's maximum (a 4-step model)
   survived the port, while FLUX.3's BASE profile and the "Base (50 steps, CFG 3.5)" preset
   ask for 50. Selecting the base checkpoint pushed 50 into the slider and Gradio refused

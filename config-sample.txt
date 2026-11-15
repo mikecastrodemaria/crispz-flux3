@@ -257,6 +257,8 @@
     "_provenance_wm_id_help": "Identifier embedded in the TrustMark watermark. Max 9 ASCII characters (error-corrected payload is ~68 bits) - longer values are truncated. E.g. your studio tag.",
     "convert_device": "auto",
     "_convert_device_help": "Where the one-time dequantization math of FP8/INT8 checkpoints runs. 'auto' (default) = GPU if available (tensor-by-tensor, a few hundred MB of VRAM at peak - the CPU path is memory-bandwidth-bound and was measured at ~9 min on a 12.9B INT8 in crispz-krea2), 'cpu' = never touch the GPU (pick this if you convert while rendering elsewhere).",
+    "nvfp4_scale_layout": "blocked",
+    "_nvfp4_scale_layout_help": "ComfyUI NVFP4 layers (comfy_quant format nvfp4, e.g. the mixed NVFP4 + INT8 FLUX.3 builds) are dequantized to bf16 at load. blocked (default) = the block scales in cuBLAS' tiled layout, as ComfyUI writes them; linear = row-major scales, for a converter that does not swizzle (only if a render from such a file comes out as noise).",
     "log_level": "info",
     "_default_negative_prompt_help": "Inert on the distilled FLUX.3 checkpoint (no CFG); honoured on the -base one. Kept empty on purpose.",
     "_omni_help": "FLUX.3 needs NO separate edit model: multi-reference editing is served by the base pipeline itself, the prompt cites the references as <ref_image_0>, <ref_image_1>... The keys 'zimage_omni_model' / 'zimage_omni_base' of crispz-qwen-edit are gone on purpose - do not re-add them at merge time.",

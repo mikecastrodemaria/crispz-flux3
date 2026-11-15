@@ -1654,6 +1654,159 @@ _DEQUANT_FORMATS = {"int8_tensorwise", "int8", "fp8_e4m3fn", "fp8_e4m3fn_tensorw
                     "mxfp8"}
 
 
+# ---------------------------------------------------------------------------
+# ComfyUI NVFP4 layers (comfy_kitchen's TensorCoreNVFP4Layout), dequantized to bf16.
+#
+# Seen on 2026-11-15: "flux3-image-klein-base-nvfp4-bdb.safetensors" (converter
+# flux3_klein_nvfp4_gptq46, "mixed precision NVFP4 + int8 + bf16 (comfy_quant per
+# layer)") carries 162 int8_tensorwise layers and 10 nvfp4 ones, declared PER TENSOR in
+# X.comfy_quant blobs. The refusal only read the central _quantization_metadata, so the
+# file went to the INT8/FP8 dequant, which read the packed nibbles as 8-bit integers: a
+# [3072, 1536] weight where diffusers wanted [3072, 3072], and a crash at load.
+#
+# The layout, as ComfyUI writes it (comfy/quant_ops.py QUANT_ALGOS["nvfp4"] and
+# comfy_kitchen.float_utils, cross-checked against an independent port of the eager
+# dequantize):
+#   X.weight          U8  [out, in/2]   two E2M1 codes per byte, the EVEN column in the
+#                                       HIGH nibble (packed = data[2i] << 4 | data[2i+1]).
+#                                       NVIDIA ModelOpt packs the other way round: do not
+#                                       "fix" it from a ModelOpt reference.
+#   X.weight_scale    F8_E4M3 [out, in/16]  one scale per block of 16 weights, stored in
+#                                       cuBLAS' tiled SWIZZLE_32_4_4 layout (to_blocked,
+#                                       padded to 128 rows x 4 block-columns).
+#   X.weight_scale_2  F32 []            the per-tensor scale.
+#   X.input_scale     F32 []            an ACTIVATION scale, not needed to rebuild W.
+#   W = E2M1[code] * float(weight_scale[block]) * weight_scale_2
+# config 'nvfp4_scale_layout': blocked (default, ComfyUI) | linear (a converter that
+# stores the block scales row-major; the shape alone cannot tell the two apart when out
+# is a multiple of 128 and in/16 a multiple of 4, as every FLUX.3 layer is).
+_E2M1_VALUES = (0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
+                -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0)
+NVFP4_SCALE_LAYOUT = str(CONFIG.get("nvfp4_scale_layout", "blocked") or "blocked").lower()
+if NVFP4_SCALE_LAYOUT not in ("blocked", "linear"):
+    print(f"[crispz] nvfp4_scale_layout={NVFP4_SCALE_LAYOUT!r} is not blocked | linear: "
+          "'blocked' (ComfyUI's layout) is used.", flush=True)
+    NVFP4_SCALE_LAYOUT = "blocked"
+
+
+def _nvfp4_unswizzle(scales, rows, col_blocks):
+    """Undoes comfy_kitchen's to_blocked: the block scales come back row-major
+    [rows, col_blocks]. The stored tensor may be 2-D (to_blocked(flatten=False), padded to
+    [ceil(rows/128)*128, ceil(col_blocks/4)*4]) or flat; only its element count matters."""
+    rb, cb = -(-rows // 128), -(-col_blocks // 4)
+    flat = scales.reshape(-1)
+    if flat.numel() != rb * 128 * cb * 4:
+        raise ValueError(f"NVFP4 block scales: {flat.numel()} values, the blocked layout "
+                         f"of a [{rows}, {col_blocks}] grid needs {rb * 128 * cb * 4}")
+    x = flat.view(rb * cb, 32, 4, 4).transpose(1, 2)          # tiles of [4, 32, 4]
+    x = x.reshape(rb, cb, 128, 4).permute(0, 2, 1, 3)          # [rb, 128, cb, 4]
+    return x.reshape(rb * 128, cb * 4)[:rows, :col_blocks]
+
+
+def _nvfp4_dequant(packed, block_scale, scale2, layout=None, device="cpu"):
+    """A ComfyUI NVFP4 weight -> float32 [out, in] (see the block comment above)."""
+    layout = layout or NVFP4_SCALE_LAYOUT
+    p = packed.to(device)
+    rows, cols = p.shape[0], p.shape[1] * 2
+    if cols % 16:
+        raise ValueError(f"NVFP4 weight: {cols} columns is not a multiple of the 16-wide block")
+    codes = torch.stack(((p >> 4) & 0xF, p & 0xF), dim=-1).reshape(rows, cols).long()
+    lut = torch.tensor(_E2M1_VALUES, dtype=torch.float32, device=device)
+    s = block_scale.to(device).to(torch.float32)
+    if layout == "blocked":
+        s = _nvfp4_unswizzle(s, rows, cols // 16)
+    else:
+        s = s.reshape(rows, cols // 16)
+    w = lut[codes] * s.repeat_interleave(16, dim=1)
+    return w * scale2.to(device).to(torch.float32).reshape(())
+
+
+def _comfy_quant_blobs(path):
+    """{layer: format} from the per-tensor X.comfy_quant blobs (tiny uint8 JSON tensors),
+    lowercased. Cached by file identity: the checkpoint menu asks for every file."""
+    try:
+        key = _file_key(path)
+    except OSError:
+        return {}
+    hit = _BLOB_FMT_CACHE.get(key)
+    if hit is not None:
+        return hit
+    out = {}
+    try:
+        from safetensors import safe_open
+        hdr = _safetensors_header(path)
+        names = [k for k in hdr if k.endswith(".comfy_quant")]
+        if names:
+            with safe_open(path, framework="pt", device="cpu") as f:
+                for k in names:
+                    try:
+                        cfg = json.loads(bytes(f.get_tensor(k).tolist()).decode("utf-8"))
+                        out[k[:-len(".comfy_quant")]] = str(cfg.get("format", "")).lower()
+                    except Exception:
+                        out[k[:-len(".comfy_quant")]] = "unreadable"
+    except Exception as e:
+        _dbg(f"comfy_quant blobs unreadable in {path}: {e}")
+    _BLOB_FMT_CACHE[key] = out
+    return out
+
+
+_BLOB_FMT_CACHE = {}
+
+
+def _nvfp4_layer_ok(hdr, layer):
+    """True when `layer` has ComfyUI's NVFP4 tensors with coherent shapes: U8 weight,
+    F8_E4M3 block scales for 16-wide blocks (padded blocked grid or exact), a scalar
+    weight_scale_2. Anything else declared nvfp4 (ModelOpt's U8 scales, another group
+    size) is a format we do not rebuild, and stays refused."""
+    for pre in ("", _COMFY_PREFIX):
+        w = hdr.get(f"{pre}{layer}.weight")
+        if isinstance(w, dict):
+            break
+    else:
+        return False
+    s = hdr.get(f"{pre}{layer}.weight_scale")
+    s2 = hdr.get(f"{pre}{layer}.weight_scale_2")
+    if not (isinstance(s, dict) and isinstance(s2, dict)):
+        return False
+    if str(w.get("dtype")).upper() != "U8" or str(s.get("dtype")).upper() != "F8_E4M3":
+        return False
+    ws, ss = w.get("shape") or [], s.get("shape") or []
+    if len(ws) != 2 or not ss:
+        return False
+    rows, cb = ws[0], (ws[1] * 2) // 16
+    n = 1
+    for d in ss:
+        n *= d
+    return (ws[1] * 2) % 16 == 0 and n in (rows * cb, -(-rows // 128) * 128 * -(-cb // 4) * 4)
+
+
+def _unsupported_quant_formats(path, hdr=None):
+    """The quantization formats a file declares (centrally or per tensor) that the dequant
+    loader cannot rebuild, sorted. 'nvfp4' counts as supported only when EVERY layer
+    declaring it has ComfyUI's layout (_nvfp4_layer_ok)."""
+    hdr = _safetensors_header(path) if hdr is None else hdr
+    declared = {}
+    for f in _quant_metadata_formats(hdr):
+        declared.setdefault(f, [])
+    try:
+        raw = (hdr.get("__metadata__") or {}).get("_quantization_metadata")
+        for lk, lv in ((json.loads(raw).get("layers") or {}) if raw else {}).items():
+            if isinstance(lv, dict):
+                declared.setdefault(str(lv.get("format", "")).lower(), []).append(lk)
+    except Exception:
+        pass
+    for layer, f in _comfy_quant_blobs(path).items():
+        declared.setdefault(f, []).append(layer)
+    odd = []
+    for f, layers in declared.items():
+        if f in _DEQUANT_FORMATS or not f:
+            continue
+        if f == "nvfp4" and layers and all(_nvfp4_layer_ok(hdr, ly) for ly in layers):
+            continue
+        odd.append(f)
+    return sorted(odd)
+
+
 def _quant_metadata_formats(hdr):
     """The quantization formats declared in __metadata__._quantization_metadata
     (ComfyUI, NVIDIA ModelOpt), lowercased. An empty set when the file declares none. It is
@@ -2123,13 +2276,29 @@ def _load_dequant_state_dict(path):
         pass
     _had = {}                                # a Hadamard cache per group size
     sd = {}
-    n_dq = n_rot = n_pre = 0
+    n_dq = n_rot = n_pre = n_fp4 = 0
     for k in list(raw.keys()):
-        if (k.endswith((".weight_scale", ".scale_weight", ".scale_input", ".input_scale"))
+        if (k.endswith((".weight_scale", ".scale_weight", ".scale_input", ".input_scale",
+                        ".weight_scale_2"))
                 or k.endswith("scaled_fp8")):
             continue                         # consommees via lookup / jetees (scale_input
                                              # = an ACTIVATION scale, not a weight one)
         t = raw.pop(k)
+        lname = k[:-len(".weight")] if k.endswith(".weight") else None
+        if (lname and t.dtype == torch.uint8
+                and str((qcfg.get(lname) or {}).get("format", "")).lower() == "nvfp4"):
+            # ComfyUI NVFP4 (see _nvfp4_dequant): packed nibbles, blocked FP8 scales and a
+            # per-tensor scale. Read as an 8-bit integer below, it came out half as wide.
+            s1, s2 = raw.get(k + "_scale"), raw.get(k + "_scale_2")
+            if s1 is None or s2 is None:
+                raise RuntimeError(
+                    f"{os.path.basename(path)}: NVFP4 layer {lname} lacks its "
+                    f"weight_scale / weight_scale_2; the file is incomplete or of "
+                    f"another NVFP4 layout.")
+            sd[k] = _nvfp4_dequant(t, s1, s2, device=dev).to(DTYPE).cpu()
+            n_dq += 1
+            n_fp4 += 1
+            continue
         if t.dtype in (torch.float8_e4m3fn, torch.float8_e5m2,
                        torch.int8, torch.uint8):
             s = None
@@ -2176,6 +2345,8 @@ def _load_dequant_state_dict(path):
           else "read (already bf16/fp16, no dequant)")
          + f" ({len(sd)} kept"
          + (f", {n_rot} un-rotated (ConvRot)" if n_rot else "")
+         + (f", {n_fp4} NVFP4 ({NVFP4_SCALE_LAYOUT} scales, high nibble first: "
+            f"ComfyUI's layout)" if n_fp4 else "")
          + (f", {n_pre} already stored at scale: weight_scale NOT applied" if n_pre else "")
          + f") to bf16 in {time.time() - t0:.1f}s")
     return sd
@@ -2410,9 +2581,10 @@ def _flux3_file_refusal(path):
         # scales, the "INT6" builds of CivitAI's FLUX.3 pages): said in the listing, with
         # the alternative, rather than at load time. The INT8 / FP8 'scaled' builds pass
         # and are dequantized by _load_transformer.
+        # The formats are read centrally AND per tensor (X.comfy_quant): the first nvfp4
+        # file (2026-11-15) declared its layers per tensor only and slipped through.
         try:
-            odd = sorted(f for f in _quant_metadata_formats(_safetensors_header(path))
-                         if f not in _DEQUANT_FORMATS)
+            odd = _unsupported_quant_formats(path)
         except Exception:
             odd = []
         if odd:
@@ -3737,8 +3909,7 @@ def _load_transformer(path=None, base=None):
                  + ("50 steps and a real CFG apply." if fv == "base" else "16 steps, no CFG."))
             base = want
         if not _is_gguf_path(path) and not cz_flux3._bfl_quant_of(path):
-            fmts = _quant_metadata_formats(_safetensors_header(path))
-            odd = sorted(f for f in fmts if f not in _DEQUANT_FORMATS)
+            odd = _unsupported_quant_formats(path)
             if odd:
                 raise RuntimeError(
                     f"{os.path.basename(path)}: comfy-quant '{odd[0]}' build (6-bit or "
@@ -3746,6 +3917,10 @@ def _load_transformer(path=None, base=None):
                     f"FP8 'scaled' builds only: take the INT8, bf16 or GGUF file of the "
                     f"same page, or BFL's fp8r / nvfp4 variant (Precision selector).")
             dq = _safetensors_dequant(path)
+            blob_fmts = sorted(set(_comfy_quant_blobs(path).values()))
+            if dq and len(blob_fmts) > 1:
+                # a mixed build: the dtype scan says "FP8 scaled", the blobs say what it is
+                dq = "mixed " + " + ".join(blob_fmts)
             if dq:
                 _log(f"{os.path.basename(path)} is a ComfyUI '{dq}' build: dequantized to "
                      f"bf16 in RAM before loading (the footprint of a full bf16 "

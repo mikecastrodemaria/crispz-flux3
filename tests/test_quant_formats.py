@@ -375,6 +375,107 @@ def test_mxfp8_is_not_caught_by_the_fp4_guard():
 
 
 
+
+# ---------------------------------------------------------------------------
+# ComfyUI NVFP4 layers (2026-11-15: flux3-image-klein-base-nvfp4-bdb.safetensors, 162
+# int8_tensorwise + 10 nvfp4 layers declared per tensor). The reference quantizer below
+# follows comfy_kitchen: E2M1 codes with the EVEN column in the HIGH nibble, one FP8 scale
+# per 16 weights in cuBLAS' blocked layout (to_blocked, flatten=False), a per-tensor scale.
+# ---------------------------------------------------------------------------
+_E2M1 = torch.tensor([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0])
+
+
+def _to_blocked(m):
+    """comfy_kitchen.float_utils.to_blocked(flatten=False), written from its definition."""
+    rows, cols = m.shape
+    rb, cb = -(-rows // 128), -(-cols // 4)
+    pad = torch.zeros(rb * 128, cb * 4, dtype=m.dtype)
+    pad[:rows, :cols] = m
+    blocks = pad.view(rb, 128, cb, 4).permute(0, 2, 1, 3)
+    return blocks.reshape(-1, 4, 32, 4).transpose(1, 2).reshape(rb * 128, cb * 4)
+
+
+def _quantize_nvfp4(W):
+    """W [out, in] -> (packed U8, blocked F8 scales, F32 scale2, the exact reconstruction)."""
+    rows, cols = W.shape
+    scale2 = (W.abs().amax() / (6.0 * 448.0)).float()
+    blocks = W.view(rows, cols // 16, 16)
+    bs = (blocks.abs().amax(-1) / 6.0 / scale2).to(torch.float8_e4m3fn)
+    bsf = bs.float().clamp(min=1e-12)
+    x = blocks / (bsf.unsqueeze(-1) * scale2)
+    mag = (x.abs().unsqueeze(-1) - _E2M1).abs().argmin(-1)        # nearest magnitude
+    codes = (mag + 8 * (x < 0).long()).view(rows, cols)
+    vals = _E2M1[mag] * torch.where(x < 0, -1.0, 1.0)
+    recon = (vals * bsf.unsqueeze(-1) * scale2).view(rows, cols)
+    packed = ((codes[:, 0::2] << 4) | codes[:, 1::2]).to(torch.uint8)
+    return packed, _to_blocked(bs.view(torch.uint8)).view(torch.float8_e4m3fn), scale2, recon
+
+
+def test_nvfp4_unswizzle_inverts_to_blocked():
+    for rows, cb in ((256, 192 // 4), (200, 10), (128, 4)):          # exact and padded grids
+        m = torch.arange(rows * cb, dtype=torch.float32).view(rows, cb)
+        back = cz_pipeline._nvfp4_unswizzle(_to_blocked(m), rows, cb)
+        assert torch.equal(back, m), (rows, cb)
+
+
+def test_nvfp4_layer_roundtrip_through_the_dequant_loader():
+    torch.manual_seed(0)
+    for rows in (256, 200):                                          # 200: padded scales
+        W = torch.randn(rows, 64)
+        packed, bs, s2, recon = _quantize_nvfp4(W)
+        lay = _W[:-len(".weight")]
+        p = _st(f"nvfp4_{rows}.safetensors", {
+            _W: packed, _W + "_scale": bs, _W + "_scale_2": s2,
+            lay + ".input_scale": torch.tensor(1.0),
+            lay + ".comfy_quant": torch.tensor(list(b'{"format": "nvfp4"}'), dtype=torch.uint8),
+        })
+        assert cz_pipeline._unsupported_quant_formats(p) == []
+        sd = cz_pipeline._load_dequant_state_dict(p)
+        got = sd[_WD].float()
+        assert got.shape == (rows, 64)                               # not [rows, 32]
+        err = float((got - recon).abs().max() / recon.abs().max())
+        assert err < 0.01, f"nvfp4 reconstruction off: {err}"
+        assert float((got - W).abs().mean() / W.abs().mean()) < 0.2  # and close to W
+        for k in sd:
+            assert not k.endswith(("_scale", "_scale_2", "input_scale", "comfy_quant")), k
+
+
+def test_nvfp4_low_nibble_first_would_be_wrong():
+    """The control: reading the nibbles the ModelOpt way scrambles the weights, so the
+    roundtrip above really pins ComfyUI's order."""
+    torch.manual_seed(1)
+    W = torch.randn(128, 32)
+    packed, bs, s2, recon = _quantize_nvfp4(W)
+    swapped = ((packed & 0xF) << 4) | (packed >> 4)
+    bad = cz_pipeline._nvfp4_dequant(swapped, bs, s2)
+    assert float((bad - recon).abs().max() / recon.abs().max()) > 0.1
+
+
+def test_a_mixed_int8_nvfp4_file_is_accepted_and_a_modelopt_one_refused():
+    torch.manual_seed(2)
+    W = torch.randn(128, 64)
+    packed, bs, s2, _ = _quantize_nvfp4(W)
+    lay = _W[:-len(".weight")]
+    q8 = torch.randint(-127, 127, (8, 32), dtype=torch.int8)
+    w8 = "model.diffusion_model.single_blocks.0.qkv.weight"
+    blob = lambda fmt: torch.tensor(list(json.dumps({"format": fmt}).encode()), dtype=torch.uint8)
+    p = _st("mixed.safetensors", {
+        _W: packed, _W + "_scale": bs, _W + "_scale_2": s2, lay + ".comfy_quant": blob("nvfp4"),
+        w8: q8, w8 + "_scale": torch.tensor(0.01), w8[:-7] + ".comfy_quant": blob("int8_tensorwise"),
+    })
+    assert cz_pipeline._unsupported_quant_formats(p) == []
+    # ModelOpt-style: U8 scales for 32-wide groups, no weight_scale_2 -> still refused
+    p2 = _st("modelopt.safetensors", {
+        _W: packed, _W + "_scale": torch.zeros(128, 4, dtype=torch.uint8),
+        lay + ".comfy_quant": blob("nvfp4"),
+    })
+    assert cz_pipeline._unsupported_quant_formats(p2) == ["nvfp4"]
+    # an unknown per-tensor format is caught by the menu guard (it read the header only)
+    p3 = _st("w4.safetensors", {w8: q8, w8 + "_scale": torch.tensor(0.01),
+                                w8[:-7] + ".comfy_quant": blob("w4a16")})
+    assert cz_pipeline._unsupported_quant_formats(p3) == ["w4a16"]
+
+
 if __name__ == "__main__":
     for fn in (test_bf16_passthrough, test_fp8_pure_detect_and_dequant,
                test_fp8_scaled_dequant_math, test_int8_per_row_scale,
