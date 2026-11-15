@@ -35,6 +35,13 @@ DEFAULTS = {
     "model": "",               # '' = the model picked in the UI, else the first installed
     "timeout": 120,
     "temperature": 0.7,
+    # Optional sampling knobs, sent only when set (null / '' = the model's own value).
+    # Added 2026-11-15 for Qwen3.8-27B, whose non-thinking (Instruct) profile is
+    # temperature 0.7, top_p 0.8, top_k 20, presence_penalty 1.5 (Unsloth docs): without
+    # the presence penalty, a rewritten prompt tends to repeat its adjectives.
+    "top_p": None,
+    "top_k": None,
+    "presence_penalty": None,
     "keep_alive": 0,
     "positive_instruction": "",
     "negative_instruction": "",
@@ -265,6 +272,28 @@ def list_models(base=None):
     return [m.get("name") for m in tags if m.get("name")]
 
 
+# The optional sampling settings and their type. Ollama takes them under `options`.
+_SAMPLING_KEYS = (("top_p", float), ("top_k", int), ("presence_penalty", float))
+
+
+def sampling_options():
+    """The optional sampling settings (top_p, top_k, presence_penalty) that are set,
+    typed for Ollama. An unset key is left out, so the model keeps its Modelfile value
+    (the behaviour before 2026-11-15). A value that does not parse is skipped AND said
+    on stderr: a typo in config.txt must not change the sampling silently."""
+    out = {}
+    for key, cast in _SAMPLING_KEYS:
+        value = _SETTINGS.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            out[key] = cast(value)
+        except (TypeError, ValueError):
+            print(f'[Improve] ignoring ollama_improve.{key}={value!r}: not a number, '
+                  "the model's own value is used.", file=sys.stderr, flush=True)
+    return out
+
+
 def improve(text, kind="positive", model=None, base=None, timeout=None, temperature=None,
             directives=None, options=None):
     """Rewrites `text` (kind 'positive' or 'negative'). Returns (improved text, model used).
@@ -282,7 +311,8 @@ def improve(text, kind="positive", model=None, base=None, timeout=None, temperat
             raise OllamaError('no model in Ollama: pull one first '
                               '(for example "ollama pull llama3.1:8b")')
         model = found[0]
-    opts = dict(options or {})
+    opts = sampling_options()
+    opts.update(options or {})   # the tool's own options (num_ctx, num_gpu...) win
     opts["temperature"] = float(temperature if temperature is not None
                                 else _setting("temperature", 0.7))
     payload = {

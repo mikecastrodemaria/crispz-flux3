@@ -6,6 +6,12 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
 
 ## Unreleased
 
+- **Improve: optional sampling settings** `ollama_improve.top_p`, `top_k` and
+  `presence_penalty` (shared `prompt_improve` module), sent only when set: an existing
+  config.txt changes nothing. Meant for Qwen3.8-27B (Unsloth UD-Q2_K_XL through Ollama,
+  about 10 GB, fits beside FLUX.3 on the 5090), whose non-thinking profile is 0.7 / 0.8 /
+  20 / 1.5. A value that does not parse is skipped and said on stderr. Port the module
+  to the other crispz forks to keep the copies identical.
 - LoRAs load under offload `model` / `sequential` (a GGUF transformer forces `model`):
   diffusers' loader removed the accelerate hooks and then called
   `enable_model_cpu_offload()` on the modular pipeline, which has none (AttributeError,

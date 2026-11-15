@@ -307,6 +307,40 @@ class TestCrispzAdaptations(unittest.TestCase):
         opts = FakeOllama.last_generate['options']
         self.assertEqual((opts['num_ctx'], opts['num_gpu'], opts['temperature']), (8192, 0, 0.7))
 
+    def test_sampling_knobs_are_absent_by_default(self):
+        # Before 2026-11-15 only the temperature was sent: an unset knob must keep the
+        # Modelfile's value, so an existing config.txt changes nothing.
+        I.improve('a fox', model='llama3.1:8b', base=self.base)
+        opts = FakeOllama.last_generate['options']
+        for key in ('top_p', 'top_k', 'presence_penalty'):
+            self.assertNotIn(key, opts)
+
+    def test_qwen38_instruct_profile_is_sent_typed(self):
+        I.configure({'temperature': 0.7, 'top_p': '0.8', 'top_k': 20.0,
+                     'presence_penalty': 1.5})
+        I.improve('a fox', model='qwen3.8:27b', base=self.base)
+        opts = FakeOllama.last_generate['options']
+        self.assertEqual((opts['temperature'], opts['top_p'], opts['top_k'],
+                          opts['presence_penalty']), (0.7, 0.8, 20, 1.5))
+        self.assertIsInstance(opts['top_k'], int)
+
+    def test_a_bad_knob_is_skipped_and_said(self):
+        import io
+        from contextlib import redirect_stderr
+        I.configure({'top_p': 'high', 'top_k': 20})
+        err = io.StringIO()
+        with redirect_stderr(err):
+            I.improve('a fox', model='llama3.1:8b', base=self.base)
+        opts = FakeOllama.last_generate['options']
+        self.assertNotIn('top_p', opts)
+        self.assertEqual(opts['top_k'], 20)
+        self.assertIn('ollama_improve.top_p', err.getvalue())
+
+    def test_tool_options_win_over_the_sampling_settings(self):
+        I.configure({'top_k': 20})
+        I.improve('a fox', model='llama3.1:8b', base=self.base, options={'top_k': 40})
+        self.assertEqual(FakeOllama.last_generate['options']['top_k'], 40)
+
     def test_model_setting_is_used_when_no_model_is_given(self):
         I.configure({'model': 'llama3.1:8b'})
         _, model = I.improve('a fox', base=self.base)
