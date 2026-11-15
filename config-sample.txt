@@ -105,6 +105,8 @@
     "force_upscale_ratio": "",
     "_force_ratio_mode_help": "How the forced ratio is reached: 'crop' = centre-crop the input to fit (edges are lost), 'extend' = outpaint the missing bands (nothing is lost, the added bands are generated).",
     "force_ratio_mode": "crop",
+    "_edit_size_from_settings_help": "Edit (references): false = the result follows Ref 1 (its size and ratio, the default of FLUX.3 for an edit); true = the Settings width / height and aspect ratio are used instead (Ref 1 is redrawn at that size: fine detail and texts may hold less well when the ratio changes). The checkbox of the tab changes it live and remembers it in preferences.json. The family protocol decides per spec (an explicit size is honoured) and never reads this.",
+    "edit_size_from_settings": false,
     "_force_ratio_extend_denoise_help": "Extend mode only: after outpainting the bands, one LIGHT img2img pass over the extended image blends the band seams - only the bands + a feathered transition margin are composited from it, the original centre stays untouched. 0 = off. 0.15-0.30 sensible.",
     "force_ratio_extend_denoise": 0.22,
     "default_performance": "Distilled (16 steps)",

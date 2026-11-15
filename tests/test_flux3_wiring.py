@@ -81,6 +81,44 @@ def test_generate_omni_edits_one_and_two_references(engine):
         P.generate_omni([], "x", "", 0, 0, 1, 7)
 
 
+def test_edit_output_size_switch(engine, monkeypatch):
+    """The 'Output size from Settings' checkbox of the Edit tab (ported from crispz-moss):
+    off (the default) the result follows Ref 1 whatever the Settings say, on it takes the
+    Settings width / height; the switch is said once per change and remembered in the
+    preferences; the protocol's generate_omni contract (honor_size per spec) is untouched."""
+    import cz_ui
+    lines = []
+    saved = []
+    monkeypatch.setattr(P, "_log", lambda m: lines.append(str(m)))
+    monkeypatch.setattr(cz_ui, "_save_prefs_keys", lambda d: saved.append(dict(d)))
+    monkeypatch.setattr(P, "EDIT_SIZE_FROM_SETTINGS", False)
+    r1 = Image.new("RGB", (64, 48), (200, 30, 30))
+    assert P.generate_omni([r1], "x", "", 96, 64, 1, 7, honor_size=P.EDIT_SIZE_FROM_SETTINGS).size == (64, 48)
+    cz_ui._ui_set_edit_size(True)
+    assert P.EDIT_SIZE_FROM_SETTINGS is True and saved == [{"edit_size_from_settings": True}]
+    assert any("edit output size" in m and "Settings" in m for m in lines)
+    assert P.generate_omni([r1], "x", "", 96, 64, 1, 7, honor_size=P.EDIT_SIZE_FROM_SETTINGS).size == (96, 64)
+    n = len([m for m in lines if "edit output size" in m])
+    cz_ui._ui_set_edit_size(True)                      # unchanged: nothing said
+    assert len([m for m in lines if "edit output size" in m]) == n
+    assert saved[-1] == {"edit_size_from_settings": True}
+    cz_ui._ui_set_edit_size(False)
+    assert P.EDIT_SIZE_FROM_SETTINGS is False
+    assert "Ref 1" in [m for m in lines if "edit output size" in m][-1]
+    assert P.generate_omni([r1], "x", "", 96, 64, 1, 7).size == (64, 48)   # the protocol default
+
+
+def test_the_edit_tab_offers_the_output_size_switch(monkeypatch):
+    """One checkbox, unticked by default, whose help names Ref 1."""
+    import gradio as gr
+    import cz_ui
+    monkeypatch.setattr(P, "EDIT_SIZE_FROM_SETTINGS", False)
+    demo = cz_ui.build_ui()
+    boxes = [b for b in demo.blocks.values()
+             if isinstance(b, gr.Checkbox) and b.label == "Output size from Settings"]
+    assert len(boxes) == 1 and boxes[0].value is False and "Ref 1" in boxes[0].info
+
+
 def test_process_one_refines_through_the_adapter(engine):
     src = Image.new("RGB", (64, 48), (90, 140, 200))
     out, timings = P.process_one(src, None, 1.0, 0.5, 3, "sharpen", 7, 512, 32,

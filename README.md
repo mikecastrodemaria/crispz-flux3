@@ -356,7 +356,10 @@ The **Edit (references)** tab is **enabled out of the box**. Drop 1 to 4 referen
 write the instruction, Generate. **Name the references in the prompt** the way FLUX.3
 was trained: `<ref_image_0>` is Ref 1, `<ref_image_1>` is Ref 2, and so on ("put the
 jacket of `<ref_image_1>` on the person in `<ref_image_0>`"). The output takes the size
-of Ref 1 unless you give one. It runs like txt2img: **Image number** makes a batch (each
+of Ref 1 unless you give one: tick **Output size from Settings** in the tab to use the
+Settings width / height and aspect ratio instead (Ref 1 is redrawn at that size, so fine
+detail may hold less well when the ratio changes; remembered in preferences.json,
+`edit_size_from_settings`). It runs like txt2img: **Image number** makes a batch (each
 image with seed + i, variants and wildcards drawn per image), **Upscale after generate**
 chains each image through ESRGAN + refine, and the face / hand **detailer** runs on the
 final image. The tab offers 4 slots; the CLI and the `czp` protocol take up to **10**

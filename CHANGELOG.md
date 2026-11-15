@@ -6,6 +6,13 @@ The app version lives in `cz_core.py` (`APP_VERSION`) and is shown in the browse
 
 ## Unreleased
 
+- **Edit (references): "Output size from Settings"** (2026-11-15, asked by Mike, ported
+  from crispz-moss): a checkbox of the Edit tab; off (default) the result follows Ref 1's
+  size and ratio, on it takes the Settings width / height and aspect ratio. The engine
+  already knew how (`generate_omni(..., honor_size=True)`, used by the protocol); the UI
+  never offered it. Remembered in preferences.json (`edit_size_from_settings`, config
+  default too); the protocol keeps its own rule (an explicit size in the spec is
+  honoured). Tests in `test_flux3_wiring`.
 - **Improve: optional sampling settings** `ollama_improve.top_p`, `top_k` and
   `presence_penalty` (shared `prompt_improve` module), sent only when set: an existing
   config.txt changes nothing. Meant for Qwen3.8-27B (Unsloth UD-Q2_K_XL through Ollama,
